@@ -25,11 +25,11 @@ TARGET_ROOT=$(echo $SOURCE_DIR_NAME | sed "s/ /_/g")
 TARGET_LIST=${TARGET_ROOT}_concat.txt
 TARGET_FILE=$TARGET_ROOT.$SOURCE_FORMAT
 
-echo "\n-abs" $SOURCE_DIR_ABS\
-"\n-format" $SOURCE_FORMAT\
-"\n-dir name" $SOURCE_DIR_NAME\
-"\n-output target" $TARGET_FILE\
-"\n-list target" $TARGET_LIST "\n"
+# echo "debug\n-abs" $SOURCE_DIR_ABS\
+# "\n-format" $SOURCE_FORMAT\
+# "\n-dir name" $SOURCE_DIR_NAME\
+# "\n-output target" $TARGET_FILE\
+# "\n-list target" $TARGET_LIST "\n"
 
 if [ -f $TARGET_LIST ]; then
     echo "target concat list file $TARGET_LIST exists; deleting.\n"
