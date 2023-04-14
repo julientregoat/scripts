@@ -4,20 +4,23 @@
 # 3. only run ffmpeg if there are files to combine; otherwise inform user
 # 4. ffmpeg exists
 
-SOURCE_DIR_ABS=$1
-SOURCE_FORMAT=$2
-SOURCE_DIR_NAME=$( echo ${SOURCE_DIR_ABS##*/} )
+set -e
 
+SOURCE_DIR_ABS=$(printf '%q\n' "$1")
+SOURCE_FORMAT=$2
+# echo $SOURCE_DIR_ABS
+cd $SOURCE_DIR_ABS # FIXME fails with spaces in the name
+
+SOURCE_DIR_NAME=${PWD##*/}
 TARGET_LIST=$SOURCE_DIR_NAME.txt
 TARGET_FILE=$SOURCE_DIR_NAME.$SOURCE_FORMAT
 
-echo "\n" $SOURCE_DIR_ABS "\n" $SOURCE_FORMAT "\n" $SOURCE_DIR_NAME "\n" $TARGET_FILE "\n" $TARGET_LIST "\n"
-cd "$SOURCE_DIR_ABS"
+echo "\n-abs" $SOURCE_DIR_ABS "\n-format" $SOURCE_FORMAT "\n-dir name" $SOURCE_DIR_NAME "\n-output target" $TARGET_FILE "\n-list target" $TARGET_LIST "\n"
 
-# FIXME support files with single quotes - need to escape them to not interfere
-printf "file '%s'\n" *.$SOURCE_FORMAT > $TARGET_LIST
-# printf "file '$(echo %s | tr "'" "\\'")'\n" *.$SOURCE_FORMAT > $TARGET_LIST
-# cat $TARGET_LIST | tr "'" "\\'" # this works but affects main list
+# NB: to use single quote in filenames with ffmpeg, need to escape them as '\''
+# for some reason, the for loop works and printf doesn't
+for f in *.mp3; do echo "file '$(echo $f | sed "s/'/'\\\''/g")" >> $TARGET_LIST; done
+# printf "file '$(echo %s | sed "s/'/'\\\''/g")'\n" *.$SOURCE_FORMAT > $TARGET_LIST
 
 ffmpeg -f concat -safe 0 -i $TARGET_LIST -c copy $TARGET_FILE
 
