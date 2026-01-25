@@ -63,30 +63,23 @@ show_usage() {
 
 # Reorganize downloaded files (idempotent - safe to call multiple times)
 reorganize_files() {
-    # Use OUTPUT_DIR if set, otherwise default to ~/Downloads
     local alac_dir="${OUTPUT_DIR:-$HOME/Downloads}/ALAC"
     local target_dir="${OUTPUT_DIR:-$HOME/Downloads}/Apple Music Downloads"
     
-    if [ ! -d "$alac_dir" ]; then
-        return 0
-    fi
+    [ ! -d "$alac_dir" ] && return 0
     
     echo "Reorganizing files..."
     mkdir -p "$target_dir"
     
     # Process each artist directory
     for artist_dir in "$alac_dir"/*; do
-        if [ ! -d "$artist_dir" ]; then
-            continue
-        fi
+        [ ! -d "$artist_dir" ] && continue
         
         local artist_name=$(basename "$artist_dir")
         
         # Process each release in the artist directory
         for release_dir in "$artist_dir"/*; do
-            if [ ! -d "$release_dir" ]; then
-                continue
-            fi
+            [ ! -d "$release_dir" ] && continue
             
             local release_name=$(basename "$release_dir")
             local new_dir_name="${artist_name} - ${release_name}"
@@ -94,7 +87,6 @@ reorganize_files() {
             
             # Move the release directory to the new location
             if [ -d "$new_dir_path" ]; then
-                # If target already exists, merge contents
                 echo "  Merging into existing: $new_dir_name"
                 cp -r "$release_dir"/* "$new_dir_path/" 2>/dev/null || true
                 rm -rf "$release_dir"
@@ -107,15 +99,11 @@ reorganize_files() {
         done
         
         # Remove artist directory if empty
-        if [ -d "$artist_dir" ] && [ -z "$(ls -A "$artist_dir")" ]; then
-            rmdir "$artist_dir" 2>/dev/null || true
-        fi
+        [ -d "$artist_dir" ] && [ -z "$(ls -A "$artist_dir")" ] && rmdir "$artist_dir" 2>/dev/null || true
     done
     
     # Remove ALAC directory if empty
-    if [ -d "$alac_dir" ] && [ -z "$(ls -A "$alac_dir")" ]; then
-        rmdir "$alac_dir" 2>/dev/null || true
-    fi
+    [ -d "$alac_dir" ] && [ -z "$(ls -A "$alac_dir")" ] && rmdir "$alac_dir" 2>/dev/null || true
     
     echo "✓ Files reorganized to: $target_dir"
 }
@@ -202,9 +190,7 @@ if ! check_alac_formats "${URLS[@]}"; then
 fi
 
 # Determine output directory (expand ~ if present)
-if [ -z "$OUTPUT_DIR" ]; then
-    OUTPUT_DIR="$HOME/Downloads"
-fi
+OUTPUT_DIR="${OUTPUT_DIR:-$HOME/Downloads}"
 OUTPUT_DIR="${OUTPUT_DIR/#\~/$HOME}"
 mkdir -p "$OUTPUT_DIR"
 

@@ -24,12 +24,6 @@ WRAPPER_PORT="${APPLE_MUSIC_WRAPPER_PORT:-10020}"
 WRAPPER_M3U8_PORT="${APPLE_MUSIC_WRAPPER_M3U8_PORT:-20020}"
 WRAPPER_ACCOUNT_PORT="${APPLE_MUSIC_WRAPPER_ACCOUNT_PORT:-30020}"
 
-# Build wrapper arguments
-WRAPPER_ARGS="-H $WRAPPER_HOST"
-if [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
-    WRAPPER_ARGS="$WRAPPER_ARGS -L $APPLE_MUSIC_USERNAME:$APPLE_MUSIC_PASSWORD"
-fi
-
 start_wrapper() {
     if container_is_running "$WRAPPER_CONTAINER"; then
         echo "Wrapper is already running (container: $WRAPPER_CONTAINER)"
@@ -98,6 +92,9 @@ start_wrapper() {
     fi
 
     # Phase 1: Login (only when no cache or FORCE_LOGIN)
+    # -L is only for initial login; the long-running server uses -H only.
+    # Using -L on the server causes re-auth on every Docker restart, so we
+    # run a short-lived login container first, then start the server.
     if [ "$NEED_LOGIN" = true ] && [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
         echo "Session not cached - authenticating first..."
         cleanup_container "$LOGIN_CONTAINER"

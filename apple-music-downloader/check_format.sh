@@ -52,16 +52,8 @@ check_alac_formats() {
         echo ""
         
         # Parse format information for each track/URL
-        # Extract all ALAC format lines (e.g., "audio-alac-stereo-44100-24")
-        local alac_formats=$(echo "$debug_output" | grep -iE "audio-alac-stereo-[0-9]+-[0-9]+")
-        
-        if [ -z "$alac_formats" ]; then
-            # Try alternative format (e.g., "24-bit/44 kHz")
-            local alt_formats=$(echo "$debug_output" | grep -iE "[0-9]+-bit/[0-9]+.*kHz")
-            if [ -n "$alt_formats" ]; then
-                alac_formats="$alt_formats"
-            fi
-        fi
+        # Extract all ALAC format lines (e.g., "audio-alac-stereo-44100-24" or "24-bit/44 kHz")
+        local alac_formats=$(echo "$debug_output" | grep -iE "(audio-alac-stereo-[0-9]+-[0-9]+|[0-9]+-bit/[0-9]+.*kHz)")
         
         # Track detected formats for validation
         local detected_sample_rate=""
@@ -79,17 +71,15 @@ check_alac_formats() {
             local sample_rate=""
             local bit_depth=""
             
-            # Try to extract from format string (e.g., "audio-alac-stereo-44100-24")
+            # Extract from format string (e.g., "audio-alac-stereo-44100-24")
             if echo "$format_line" | grep -qiE "audio-alac-stereo-[0-9]+-[0-9]+"; then
                 sample_rate=$(echo "$format_line" | grep -oE "audio-alac-stereo-([0-9]+)-[0-9]+" | sed 's/audio-alac-stereo-\([0-9]*\)-.*/\1/' | head -1)
                 bit_depth=$(echo "$format_line" | grep -oE "audio-alac-stereo-[0-9]+-([0-9]+)" | sed 's/audio-alac-stereo-[0-9]*-\(.*\)/\1/' | head -1)
-            # Try alternative format (e.g., "24-bit/44 kHz")
+            # Extract from alternative format (e.g., "24-bit/44 kHz")
             elif echo "$format_line" | grep -qiE "[0-9]+-bit/[0-9]+.*kHz"; then
                 bit_depth=$(echo "$format_line" | grep -oE "([0-9]+)-bit" | grep -oE "[0-9]+" | head -1)
                 local sample_rate_khz=$(echo "$format_line" | grep -oE "([0-9]+).*kHz" | grep -oE "[0-9]+" | head -1)
-                if [ -n "$sample_rate_khz" ]; then
-                    sample_rate=$((sample_rate_khz * 1000))
-                fi
+                [ -n "$sample_rate_khz" ] && sample_rate=$((sample_rate_khz * 1000))
             fi
             
             if [ -n "$sample_rate" ] && [ -n "$bit_depth" ]; then
