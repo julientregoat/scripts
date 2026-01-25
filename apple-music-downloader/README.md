@@ -381,6 +381,55 @@ This shows all available formats without downloading. Look for `alac` or `audio-
 
 For advanced features (Dolby Atmos, AAC, interactive selection, search, lyrics), see the [apple-music-downloader README](https://github.com/zhaarey/apple-music-downloader#readme) for Docker command examples. The basic script downloads ALAC by default.
 
+## Remote wrapper (x86_64)
+
+If the local arm64 wrapper crashes during decryption (e.g. "connection reset by peer"), you can run the **wrapper** remotely on x86_64 and keep the **downloader** local. The downloader works fine; the issue is the arm64 wrapper. You do **not** need AppleMusicDecrypt or wrapper-manager for this.
+
+### Why decrypt can fail even with a single download
+
+Even one downloader still uses **streaming decrypt**: it sends encrypted chunks to the wrapper and receives decrypted chunks back. Requests can overlap (e.g. next chunk while the previous decrypt is in flight), or the arm64 wrapper can crash on that code path regardless. So it’s not necessarily concurrency across tracks; it can be arm64 wrapper instability under decrypt load.
+
+### Best approach: remote wrapper + same downloader
+
+- **Downloader:** Keep using the current one (zhaarey) locally.
+- **Wrapper:** Run it remotely on **x86_64** (e.g. ECS, EC2, or any Linux x86_64 host).
+- **No** AppleMusicDecrypt, **no** wrapper-manager for single-user, single-download use.
+
+### Running the wrapper on ECS (or similar)
+
+1. **Build the wrapper for x86_64**  
+   Use the existing setup (main-branch Dockerfile + prebuilt binary), but build for `linux/amd64`, e.g. `docker build --platform linux/amd64 -t wrapper .`, or run `./setup.sh` on an x86_64 machine/runner.
+
+2. **Run the wrapper on ECS**  
+   - One task/service: wrapper container.
+   - Expose **10020** (decrypt), **20020** (m3u8), **30020** (account).
+   - Use `-H 0.0.0.0` (already the default).
+   - Mount a volume (or EFS) for `data/` so the session persists across restarts.
+   - Do **one-time login + 2FA** on that remote instance; after that it uses the cached session.
+
+3. **Start the wrapper**  
+   The wrapper can be **started remotely** (e.g. via ECS task definition, systemd, or your orchestrator). You can also trigger a remote run from your machine (e.g. SSH + `docker run`, or ECS RunTask) if you prefer; the important part is that it runs on x86_64 with persistent `data/`.
+
+4. **Point the downloader at the remote wrapper**  
+   The downloader reads **config.yaml** (`decrypt-m3u8-port`, `get-m3u8-port`), not env vars. To use a remote wrapper you must **mount a config** that sets those to your remote host:port, for example:
+
+   ```yaml
+   decrypt-m3u8-port: "your-ecs-host-or-alb:10020"
+   get-m3u8-port: "your-ecs-host-or-alb:20020"
+   ```
+
+   The current scripts use `APPLE_MUSIC_WRAPPER_HOST` / `APPLE_MUSIC_WRAPPER_PORT` only for **checking** reachability and for **wrapper.sh**; they do **not** pass wrapper URL into the downloader container. Support for a remote wrapper would require generating or using a config that points at the remote host when using a non-local wrapper.
+
+### Do you need wrapper-manager?
+
+**No**, for single-user, single-download use. wrapper-manager is for multi-instance, load balancing, and higher throughput. A **single** wrapper on ECS (or similar) is enough. Add wrapper-manager only if you later need multiple wrappers or scaling.
+
+### Summary
+
+- **Best bet:** Run the **wrapper** on **ECS (or any x86_64 host)** using the existing build/Docker setup; run the **downloader** locally.
+- **Gap today:** The downloader gets the wrapper URL from **config**, not from our env. We’d need to add logic (e.g. when using a remote host) to create or mount a `config.yaml` with `decrypt-m3u8-port` / `get-m3u8-port` pointing at the remote wrapper.
+- **Keep the local flow** for others who run wrapper + downloader locally (e.g. on x86_64 Linux or when arm64 works for them).
+
 ## References
 
 ### Primary Resources
