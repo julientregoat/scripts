@@ -2,16 +2,11 @@
 # Shared utility functions for apple-music-downloader scripts
 # Can be sourced: source utils.sh
 
-# ============================================================================
 # Shared Constants
-# ============================================================================
 export DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
 
-# ============================================================================
 # Environment Loading
-# ============================================================================
-# Load .env file from a directory
-# Usage: load_env <directory>
+# load_env <directory> - Load .env file from directory
 load_env() {
     local dir="$1"
     if [ -f "$dir/.env" ]; then
@@ -21,11 +16,7 @@ load_env() {
     fi
 }
 
-# ============================================================================
 # Dependency Checks
-# ============================================================================
-# Require Docker to be installed (exits with error if not found)
-# Usage: require_docker
 require_docker() {
     if ! command -v docker &> /dev/null; then
         echo "error: Docker must be installed."
@@ -33,13 +24,7 @@ require_docker() {
     fi
 }
 
-# ============================================================================
-# Architecture Detection
-# ============================================================================
-# Detect system architecture
-# Sets variable: SYSTEM_ARCH
-#
-# Supported architectures: x86_64, arm64
+# Architecture Detection (sets SYSTEM_ARCH: x86_64 or arm64)
 
 _detect_system_architecture() {
     # Detect architecture
@@ -64,12 +49,8 @@ if [[ -z "${SYSTEM_ARCH:-}" ]]; then
     _detect_system_architecture
 fi
 
-# ============================================================================
 # Network Utilities
-# ============================================================================
-# Check if a TCP port is accessible
-# Usage: check_port <host> <port>
-# Returns 0 if accessible, 1 otherwise
+# check_port <host> <port> - Returns 0 if TCP port is accessible
 check_port() {
     local host="$1"
     local port="$2"
@@ -83,27 +64,20 @@ check_port() {
     fi
 }
 
-# ============================================================================
 # Docker Container Utilities
-# ============================================================================
-# Check if a Docker container is running
-# Usage: container_is_running <container_name>
-# Returns 0 if running, 1 otherwise
+# container_is_running <name> - Returns 0 if container is running
 container_is_running() {
     local container="$1"
     docker ps --format '{{.Names}}' | grep -q "^${container}$" 2>/dev/null
 }
 
-# Check if a Docker container exists (running or stopped)
-# Usage: container_exists <container_name>
-# Returns 0 if exists, 1 otherwise
+# container_exists <name> - Returns 0 if container exists (running or stopped)
 container_exists() {
     local container="$1"
     docker ps -a --format '{{.Names}}' | grep -q "^${container}$" 2>/dev/null
 }
 
-# Stop and remove a container
-# Usage: cleanup_container <container_name>
+# cleanup_container <name> - Stop and remove container
 cleanup_container() {
     local container="$1"
     docker stop "$container" >/dev/null 2>&1 || true

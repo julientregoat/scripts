@@ -12,12 +12,11 @@ source "$SCRIPT_DIR/utils.sh"
 # Load .env if it exists
 load_env "$SCRIPT_DIR"
 
-# Note: Format checking with --debug doesn't require the wrapper (only queries metadata)
+# Format checking uses --debug mode which only queries metadata (no wrapper needed)
 
-# Check ALAC availability and validate formats
-# Usage: check_alac_formats <url1> [url2] [url3] ...
-# Sets global variables: ALAC_MAX, detected_bit_depth, detected_sample_rate
-# Returns 0 if all formats meet requirements, 1 otherwise
+# Check ALAC availability and validate formats for given URLs
+# Usage: check_alac_formats <url1> [url2] ...
+# Sets ALAC_MAX based on detected bit depth. Returns 0 if valid, 1 otherwise.
 check_alac_formats() {
     local urls=("$@")
     local url_count=${#urls[@]}
@@ -105,8 +104,7 @@ check_alac_formats() {
                     detected_bit_depth=$bit_depth
                 fi
                 
-                # Validate this format against minimum requirements
-                # Minimum: 16-bit depth, 44.1 kHz sample rate
+                # Validate against minimum requirements (16-bit, 44.1 kHz)
                 local min_bit_depth=16
                 local min_sample_rate=44100
                 
@@ -184,14 +182,9 @@ check_alac_formats() {
     fi
 }
 
-# If script is run directly (not sourced), execute as standalone format checker
+# Standalone execution (when not sourced)
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    # Check Docker
     require_docker
-    
-    # Note: Format checking with --debug doesn't require the wrapper
-    # The wrapper is only needed for actual downloading/decryption
-    # So we skip wrapper checks here to make format checks faster
     
     URL=$1
     if [ -z "$URL" ]; then

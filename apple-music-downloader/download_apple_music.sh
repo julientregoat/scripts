@@ -61,8 +61,7 @@ show_usage() {
     fi
 }
 
-# Reorganize downloaded files function (defined early so cleanup can use it)
-# This function is idempotent - safe to call multiple times
+# Reorganize downloaded files (idempotent - safe to call multiple times)
 reorganize_files() {
     # Use OUTPUT_DIR if set, otherwise default to ~/Downloads
     local alac_dir="${OUTPUT_DIR:-$HOME/Downloads}/ALAC"
@@ -232,15 +231,7 @@ if [[ "$SYSTEM_ARCH" == "arm64" ]]; then
     echo ""
 fi
 
-# Run downloader in Docker
-# --network host: allows access to localhost wrapper
-# -v for output directory
-# --alac-max (passed to downloader): limit sample rate based on bit depth (or user override)
-# 
-# Quality: ALAC (lossless) is the default and highest quality format.
-# We've already checked that ALAC is available above (check_alac_formats exits with error if not),
-# so this will download ALAC. The script does not fallback to other formats - it errors if ALAC is unavailable.
-# Pass all URLs at once for efficient batch downloading
+# Run downloader in Docker (ALAC already validated by check_alac_formats)
 docker_args=(
     --rm
     --name "$DOWNLOADER_CONTAINER"
@@ -275,11 +266,7 @@ if container_exists "$DOWNLOADER_CONTAINER"; then
     docker rm "$DOWNLOADER_CONTAINER" >/dev/null 2>&1 || true
 fi
 
-# Run download - this may take a while for large albums
-# Note: docker run blocks until completion. For very large downloads, if the script
-# is interrupted (e.g., by tool timeouts), the container will continue running.
-# When it finishes, it will exit and be automatically removed (--rm flag).
-# Files will be in OUTPUT_DIR/ALAC/ and can be reorganized by re-running the script.
+# Run download (blocks until completion; files in OUTPUT_DIR/ALAC/ if interrupted)
 echo "Starting download (this may take several minutes for large albums)..."
 if ! docker run "${docker_args[@]}"; then
     echo ""

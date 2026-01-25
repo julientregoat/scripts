@@ -82,10 +82,10 @@ start_wrapper() {
     fi
     echo ""
 
-    # Check if session is already cached (accounts.sqlitedb exists with content)
-    # Per wrapper docs: -L is ONLY for initial login; the long‑running server must use -H only.
-    # Using -L on the server container causes re-auth on every Docker restart (e.g. after crash
-    # during decryption), so we run a short-lived login container first, then the server.
+    # Check for cached session
+    # -L is only for initial login; the long-running server uses -H only.
+    # Using -L on the server causes re-auth on every Docker restart, so we
+    # run a short-lived login container first, then start the server.
     local SESSION_FILE="$WRAPPER_DATA_DIR/data/com.apple.android.music/files/accounts.sqlitedb"
     local NEED_LOGIN=false
 
@@ -97,7 +97,7 @@ start_wrapper() {
         echo "Forcing re-authentication..."
     fi
 
-    # -------- Phase 1: Login (only when no cache or FORCE_LOGIN) --------
+    # Phase 1: Login (only when no cache or FORCE_LOGIN)
     if [ "$NEED_LOGIN" = true ] && [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
         echo "Session not cached - authenticating first..."
         cleanup_container "$LOGIN_CONTAINER"
@@ -165,7 +165,7 @@ start_wrapper() {
         echo "Using cached session (no re-authentication needed)"
     fi
 
-    # -------- Phase 2: Server (always -H only; restarts use cached session) --------
+    # Phase 2: Server (uses cached session)
     cleanup_container "$WRAPPER_CONTAINER"
 
     if ! docker run -d \

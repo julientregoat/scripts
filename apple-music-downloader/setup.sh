@@ -77,9 +77,7 @@ echo ""
 echo "Setting up wrapper (decryption server) with Docker..."
 echo ""
 
-# Clone or update wrapper repository
-# Always use main branch - it has a simple Dockerfile that uses prebuilt binaries
-# The arm64 branch's Dockerfile tries to build from source (broken for public use)
+# Clone or update wrapper repository (main branch uses prebuilt binaries)
 if [ -d "$WRAPPER_REPO_DIR" ]; then
     echo "Updating wrapper repository..."
     cd "$WRAPPER_REPO_DIR"
@@ -169,11 +167,8 @@ if curl -L -o "$WRAPPER_ZIP_PATH" "$WRAPPER_BINARY_URL"; then
         chmod +x "$WRAPPER_BINARY_PATH"
         echo "✓ Binary extracted and ready"
         
-        # Restore only the Dockerfile from main branch
-        # Release zips include their branch's Dockerfile (complex build-from-source)
-        # but we need the main branch's simple Dockerfile that uses prebuilt binaries
-        # NOTE: We keep the rootfs/ from the release because the arm64 binary needs
-        # arm64 shared libraries (.so files) - using x86_64 libs causes "corrupted shared library" errors
+        # Restore main branch Dockerfile (release zips have build-from-source version)
+        # Keep rootfs/ from release - arm64 binary needs arm64 shared libraries
         git checkout -- Dockerfile 2>/dev/null || true
     else
         echo "error: Could not find binary in extracted zip"
@@ -184,8 +179,7 @@ else
     exit 1
 fi
 
-# Clean up old wrapper images (any platform) before building new one
-# Remove images that match the base name but not the current platform-specific name
+# Clean up old wrapper images before building new one
 echo "Cleaning up old wrapper images..."
 docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${WRAPPER_IMAGE_BASE}" | grep -v "^${WRAPPER_IMAGE}:latest$" | while read old_image; do
     if [ -n "$old_image" ]; then
@@ -204,8 +198,7 @@ else
     exit 1
 fi
 
-# Pull downloader image
-# Note: The downloader image only has x86_64 builds, so on arm64 we need to use --platform
+# Pull downloader image (x86_64 only, uses Rosetta on arm64)
 echo "Pulling downloader image..."
 if [[ "$SYSTEM_ARCH" == "arm64" ]]; then
     DOWNLOADER_PLATFORM_FLAG="--platform linux/amd64"
