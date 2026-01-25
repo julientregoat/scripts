@@ -316,8 +316,8 @@ fi
 # --alac-max (passed to downloader): limit sample rate based on bit depth (or user override)
 # 
 # Quality: ALAC (lossless) is the default and highest quality format.
-# We've already checked that ALAC is available above, so this will download ALAC.
-# The downloader automatically selects ALAC if available, but we error if it's not.
+# We've already checked that ALAC is available above (check_alac_formats exits with error if not),
+# so this will download ALAC. The script does not fallback to other formats - it errors if ALAC is unavailable.
 # Pass all URLs at once for efficient batch downloading
 docker_args=(
     --rm

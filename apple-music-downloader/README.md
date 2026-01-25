@@ -187,7 +187,7 @@ The `.env` file is gitignored for security.
 
 ## Quality
 
-**ALAC (lossless) is the default and highest quality format.** The downloader automatically selects ALAC if available, falling back to other formats only if ALAC is not available for a specific track.
+**ALAC (lossless) is the default and highest quality format.** The script requires ALAC to be available and will error out if ALAC is not available for any track.
 
 **Sample Rate Auto-Detection and Validation:**
 - The script automatically detects bit depth and sample rate from available formats
@@ -227,7 +227,7 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 - Lossy audio format (quality loss from compression)
 - Lower quality than ALAC
 - Requires `media-user-token` to download
-- Only use if ALAC is not available (rare)
+- Not used by this script (script errors if ALAC unavailable)
 
 **MV (Music Video)** - ❌ **Not for audio-only downloads**
 - Downloads the music video file (video + audio)
@@ -240,12 +240,12 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 - Lower quality than ALAC despite being "high quality"
 - Spatial audio format (surround sound/3D audio)
 - On Apple Music, Dolby Atmos is delivered as lossy EC3, not lossless TrueHD
-- Only used as fallback if ALAC unavailable
+- Not used by this script (script errors if ALAC unavailable)
 - Not recommended for lossless audio collection
 
 **Other formats (AAC, etc.)**
 - Lossy formats, lower quality than ALAC
-- Only used as fallback if ALAC unavailable
+- Not used by this script (script errors if ALAC unavailable)
 - Not recommended for lossless audio collection
 
 ## Prerequisites
