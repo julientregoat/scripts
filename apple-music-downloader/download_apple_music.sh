@@ -6,23 +6,60 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
-DOWNLOADER_CONTAINER="${APPLE_MUSIC_DOWNLOADER_CONTAINER:-apple-music-downloader}"
-CHECK_FORMAT_SCRIPT="$SCRIPT_DIR/check_format.sh"
+
+# Source shared utilities (must come before using any utilities)
+source "$SCRIPT_DIR/utils.sh"
 
 # Load .env if it exists
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-fi
+load_env "$SCRIPT_DIR"
 
-# Source shared utilities (architecture detection)
-source "$SCRIPT_DIR/utils.sh"
+DOWNLOADER_CONTAINER="${APPLE_MUSIC_DOWNLOADER_CONTAINER:-apple-music-downloader}"
+CHECK_FORMAT_SCRIPT="$SCRIPT_DIR/check_format.sh"
 
 # Initialize variables
 OUTPUT_DIR=""
 ALAC_MAX=""
+
+# Show usage/help message
+# Usage: show_usage [--detailed]
+show_usage() {
+    local detailed="${1:-}"
+    
+    echo "usage: $0 [options] <apple-music-url> [url2] [url3] ..."
+    echo ""
+    echo "Download lossless ALAC audio from Apple Music URLs."
+    echo "Supports tracks, albums, playlists, and artists."
+    echo "Can download multiple URLs in a single run (more efficient)."
+    echo ""
+    echo "Options:"
+    echo "  --output-dir DIR         Output directory for downloads (default: ~/Downloads)"
+    if [ "$detailed" = "--detailed" ]; then
+        echo "  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect based on bit depth)"
+        echo "                            44100 for 16-bit, 48000 for 24-bit"
+        echo "                            Override: 44100, 48000, 96000, 192000"
+    else
+        echo "  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect)"
+    fi
+    echo "  -h, --help               Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 https://music.apple.com/us/album/album-name/1234567890"
+    echo "  $0 --output-dir ~/Music https://music.apple.com/us/album/album-name/1234567890"
+    if [ "$detailed" = "--detailed" ]; then
+        echo "  $0 --max-sample-rate 44100 https://music.apple.com/us/album/album-name/1234567890"
+    fi
+    echo "  $0 https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456"
+    
+    if [ "$detailed" = "--detailed" ]; then
+        echo ""
+        echo "Environment variables:"
+        echo "  APPLE_MUSIC_WRAPPER_HOST  - Wrapper host (default: 127.0.0.1)"
+        echo "  APPLE_MUSIC_WRAPPER_PORT  - Wrapper port (default: 10020)"
+        echo ""
+        echo "Note: The wrapper is a long-lived service. Start it once with ./wrapper.sh start"
+        echo "and leave it running for multiple downloads."
+    fi
+}
 
 # Reorganize downloaded files function (defined early so cleanup can use it)
 # This function is idempotent - safe to call multiple times
@@ -121,33 +158,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --help|-h)
-            cat << EOF
-usage: $0 [options] <apple-music-url> [url2] [url3] ...
-
-Download lossless ALAC audio from Apple Music URLs.
-Supports tracks, albums, playlists, and artists.
-Can download multiple URLs in a single run (more efficient).
-
-Options:
-  --output-dir DIR  Output directory for downloads (default: ~/Downloads)
-  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect based on bit depth)
-                            44100 for 16-bit, 48000 for 24-bit
-                            Override: 44100, 48000, 96000, 192000
-  -h, --help        Show this help message
-
-Examples:
-  $0 https://music.apple.com/us/album/album-name/1234567890
-  $0 --output-dir ~/Music https://music.apple.com/us/album/album-name/1234567890
-  $0 --max-sample-rate 44100 https://music.apple.com/us/album/album-name/1234567890
-  $0 https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456
-
-Environment variables:
-  APPLE_MUSIC_WRAPPER_HOST  - Wrapper host (default: 127.0.0.1)
-  APPLE_MUSIC_WRAPPER_PORT - Wrapper port (default: 10020)
-
-Note: The wrapper is a long-lived service. Start it once with ./wrapper.sh start
-and leave it running for multiple downloads.
-EOF
+            show_usage --detailed
             exit 0
             ;;
         *)
@@ -159,31 +170,12 @@ done
 # Collect all URLs (everything remaining after flags)
 URLS=("$@")
 if [ ${#URLS[@]} -eq 0 ]; then
-    echo "usage: $0 [options] <apple-music-url> [url2] [url3] ..."
-    echo ""
-    echo "Download lossless ALAC audio from Apple Music URLs."
-    echo "Supports tracks, albums, playlists, and artists."
-    echo "Can download multiple URLs in a single run (more efficient)."
-    echo ""
-    echo "Options:"
-    echo "  --output-dir DIR  Output directory for downloads (default: ~/Downloads)"
-    echo "  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect)"
-    echo "  -h, --help        Show detailed help"
-    echo ""
-    echo "Examples:"
-    echo "  $0 https://music.apple.com/us/album/album-name/1234567890"
-    echo "  $0 --output-dir ~/Music https://music.apple.com/us/album/album-name/1234567890"
-    echo "  $0 https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456"
-    echo ""
-    echo "See --help for more information."
+    show_usage
     exit 1
 fi
 
 # Check Docker
-if ! command -v docker &> /dev/null; then
-    echo "error: Docker must be installed."
-    exit 1
-fi
+require_docker
 
 # Check MP4Box
 if ! command -v MP4Box &> /dev/null && ! command -v mp4box &> /dev/null; then

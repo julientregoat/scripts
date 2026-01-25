@@ -1,6 +1,37 @@
 #!/usr/bin/env bash
-# Shared utility functions for architecture detection
+# Shared utility functions for apple-music-downloader scripts
 # Can be sourced: source utils.sh
+
+# ============================================================================
+# Shared Constants
+# ============================================================================
+export DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
+
+# ============================================================================
+# Environment Loading
+# ============================================================================
+# Load .env file from a directory
+# Usage: load_env <directory>
+load_env() {
+    local dir="$1"
+    if [ -f "$dir/.env" ]; then
+        set -a
+        source "$dir/.env"
+        set +a
+    fi
+}
+
+# ============================================================================
+# Dependency Checks
+# ============================================================================
+# Require Docker to be installed (exits with error if not found)
+# Usage: require_docker
+require_docker() {
+    if ! command -v docker &> /dev/null; then
+        echo "error: Docker must be installed."
+        exit 1
+    fi
+}
 
 # ============================================================================
 # Architecture Detection

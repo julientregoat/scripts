@@ -5,18 +5,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
+
+# Source shared utilities (provides DOWNLOADER_IMAGE, load_env, require_docker)
+source "$SCRIPT_DIR/utils.sh"
 
 # Load .env if it exists
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-fi
+load_env "$SCRIPT_DIR"
 
 # Note: Format checking with --debug doesn't require the wrapper (only queries metadata)
-# This script doesn't need utils.sh - if sourced by download_apple_music.sh,
-# that script will source utils.sh directly
 
 # Check ALAC availability and validate formats
 # Usage: check_alac_formats <url1> [url2] [url3] ...
@@ -191,10 +187,7 @@ check_alac_formats() {
 # If script is run directly (not sourced), execute as standalone format checker
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # Check Docker
-    if ! command -v docker &> /dev/null; then
-        echo "error: Docker must be installed."
-        exit 1
-    fi
+    require_docker
     
     # Note: Format checking with --debug doesn't require the wrapper
     # The wrapper is only needed for actual downloading/decryption
@@ -218,7 +211,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     
     # Collect all URLs
     shift
-    local urls=("$URL" "$@")
+    urls=("$URL" "$@")
     
     # Run format check
     if check_alac_formats "${urls[@]}"; then

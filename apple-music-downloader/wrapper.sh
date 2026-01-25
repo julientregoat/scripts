@@ -9,19 +9,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source shared utilities (includes architecture detection)
 source "$SCRIPT_DIR/utils.sh"
 
+# Load .env if it exists
+load_env "$SCRIPT_DIR"
+
 # Set default image name based on detected architecture
 DEFAULT_WRAPPER_IMAGE="apple-music-wrapper-${SYSTEM_ARCH}"
 WRAPPER_IMAGE="${APPLE_MUSIC_WRAPPER_IMAGE:-$DEFAULT_WRAPPER_IMAGE}"
 WRAPPER_CONTAINER="${APPLE_MUSIC_WRAPPER_CONTAINER:-apple-music-wrapper}"
 LOGIN_CONTAINER="${WRAPPER_CONTAINER}-login"
 WRAPPER_DATA_DIR="$SCRIPT_DIR/data"
-
-# Load .env if it exists
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-fi
 
 WRAPPER_HOST="${APPLE_MUSIC_WRAPPER_HOST:-127.0.0.1}"
 WRAPPER_PORT="${APPLE_MUSIC_WRAPPER_PORT:-10020}"

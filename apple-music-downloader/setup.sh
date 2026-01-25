@@ -7,10 +7,9 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared utilities (includes architecture detection)
+# Source shared utilities (includes architecture detection, DOWNLOADER_IMAGE)
 source "$SCRIPT_DIR/utils.sh"
 
-DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
 # WRAPPER_IMAGE will be set based on architecture (includes platform suffix)
 WRAPPER_IMAGE_BASE="apple-music-wrapper"
 WRAPPER_REPO_URL="https://github.com/WorldObservationLog/wrapper"
