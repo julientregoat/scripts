@@ -140,9 +140,13 @@ if [ -z "$WRAPPER_BINARY_URL" ]; then
     exit 1
 fi
 
-# Clean up any old binary files and zip files
+# Clean up any old binary files and zip files (exclude the wrapper binary we'll use)
 echo "Cleaning up old files..."
-find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper.*" -o -name "*.zip" \) ! -name "wrapper" -exec rm -f {} \; 2>/dev/null || true
+find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper.*" -o -name "*.zip" \) ! -name "wrapper" -print0 | while IFS= read -r -d '' file; do
+    # Skip wrapper.zip if it exists (we're about to download it)
+    [ "$(basename "$file")" = "wrapper.zip" ] && continue
+    rm -f "$file" 2>/dev/null || true
+done
 
 # Download binary/zip
 echo "Downloading latest binary for $SYSTEM_ARCH..."
@@ -159,7 +163,8 @@ if curl -L -o "$WRAPPER_ZIP_PATH" "$WRAPPER_BINARY_URL"; then
     rm -f "$WRAPPER_ZIP_PATH"
     
     # Find the extracted binary (try both uppercase Wrapper.* and lowercase wrapper)
-    WRAPPER_EXTRACTED_BINARY=$(find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper" \) ! -name "*.zip" | head -1)
+    # Use sort to ensure consistent ordering and avoid duplicates
+    WRAPPER_EXTRACTED_BINARY=$(find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper" \) ! -name "*.zip" | sort | head -1)
     if [ -n "$WRAPPER_EXTRACTED_BINARY" ] && [ -f "$WRAPPER_EXTRACTED_BINARY" ]; then
         if [ "$WRAPPER_EXTRACTED_BINARY" != "$WRAPPER_BINARY_PATH" ]; then
             mv "$WRAPPER_EXTRACTED_BINARY" "$WRAPPER_BINARY_PATH"
