@@ -17,8 +17,8 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
-# Source shared wrapper utilities (architecture detection)
-source "$SCRIPT_DIR/wrapper_utils.sh"
+# Source shared utilities (architecture detection)
+source "$SCRIPT_DIR/utils.sh"
 
 # Initialize variables
 OUTPUT_DIR=""
@@ -234,13 +234,6 @@ reorganize_files 2>/dev/null || true
 
 echo "Downloading from Apple Music..."
 
-# Show architecture information
-if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
-    echo "System: arm64 (Apple Silicon) | Downloader: x86_64 (no arm64 build available - using Rosetta 2)"
-else
-    echo "System: x86_64 | Downloader: x86_64"
-fi
-
 if [ ${#URLS[@]} -eq 1 ]; then
     echo "URL: ${URLS[0]}"
 else
@@ -253,7 +246,7 @@ echo "Output: $OUTPUT_DIR"
 echo ""
 
 # Warn on Apple Silicon (arm64): local wrapper can crash with albums/multiple tracks
-if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+if [[ "$SYSTEM_ARCH" == "arm64" ]]; then
     echo "⚠️  Apple Silicon: The local wrapper may crash during decryption when downloading albums or multiple tracks. Single-track (song) downloads often work. See README → Troubleshooting → Decryption fails."
     echo ""
 fi

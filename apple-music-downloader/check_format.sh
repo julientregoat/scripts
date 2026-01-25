@@ -15,8 +15,8 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 # Note: Format checking with --debug doesn't require the wrapper (only queries metadata)
-# This script doesn't need wrapper_utils.sh - if sourced by download_apple_music.sh,
-# that script will source wrapper_utils.sh directly
+# This script doesn't need utils.sh - if sourced by download_apple_music.sh,
+# that script will source utils.sh directly
 
 # Check ALAC availability and validate formats
 # Usage: check_alac_formats <url1> [url2] [url3] ...

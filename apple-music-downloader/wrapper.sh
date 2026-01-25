@@ -6,11 +6,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared wrapper utilities (includes architecture detection and runtime utilities)
-source "$SCRIPT_DIR/wrapper_utils.sh"
+# Source shared utilities (includes architecture detection)
+source "$SCRIPT_DIR/utils.sh"
 
 # Set default image name based on detected architecture
-DEFAULT_WRAPPER_IMAGE="apple-music-wrapper-${WRAPPER_IMAGE_SUFFIX}"
+DEFAULT_WRAPPER_IMAGE="apple-music-wrapper-${SYSTEM_ARCH}"
 WRAPPER_IMAGE="${APPLE_MUSIC_WRAPPER_IMAGE:-$DEFAULT_WRAPPER_IMAGE}"
 WRAPPER_CONTAINER="${APPLE_MUSIC_WRAPPER_CONTAINER:-apple-music-wrapper}"
 LOGIN_CONTAINER="${WRAPPER_CONTAINER}-login"
@@ -52,21 +52,19 @@ start_wrapper() {
         exit 1
     fi
 
-    # Check for credentials on Apple Silicon (required - wrapper exits without them)
-    if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
-        if [ -z "$APPLE_MUSIC_USERNAME" ] || [ -z "$APPLE_MUSIC_PASSWORD" ]; then
-            echo "error: Apple Music credentials are REQUIRED on Apple Silicon"
-            echo ""
-            echo "The wrapper exits immediately without credentials on arm64."
-            echo ""
-            echo "To configure:"
-            echo "  1. Copy .env.template to .env"
-            echo "  2. Set APPLE_MUSIC_USERNAME and APPLE_MUSIC_PASSWORD"
-            echo "  3. Run ./wrapper.sh start again"
-            echo ""
-            echo "First-time setup requires 2FA - see .env.template for instructions"
-            exit 1
-        fi
+    # Check for credentials (required - wrapper requires credentials to function)
+    if [ -z "$APPLE_MUSIC_USERNAME" ] || [ -z "$APPLE_MUSIC_PASSWORD" ]; then
+        echo "error: Apple Music credentials are REQUIRED"
+        echo ""
+        echo "The wrapper requires login credentials to function."
+        echo ""
+        echo "To configure:"
+        echo "  1. Copy .env.template to .env"
+        echo "  2. Set APPLE_MUSIC_USERNAME and APPLE_MUSIC_PASSWORD"
+        echo "  3. Run ./wrapper.sh start again"
+        echo ""
+        echo "First-time setup requires 2FA - see .env.template for instructions"
+        exit 1
     fi
 
     # Create data directory and 2FA file directory
@@ -76,11 +74,11 @@ start_wrapper() {
     echo "Starting wrapper (Docker container)..."
     
     # Show architecture information
-    if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+    if [[ "$SYSTEM_ARCH" == "arm64" ]]; then
         echo "System: arm64 (Apple Silicon) | Wrapper: arm64 (native)"
         echo "Note: Album/multi-track downloads may crash the wrapper; single-track downloads often work. See README → Decryption fails."
     else
-        echo "System: x86_64 | Wrapper: $WRAPPER_ARCH"
+        echo "System: x86_64 | Wrapper: $SYSTEM_ARCH"
     fi
 
     echo "Host: $WRAPPER_HOST"
@@ -169,11 +167,8 @@ start_wrapper() {
         echo "Session cached. Starting server..."
         echo ""
     elif [ "$NEED_LOGIN" = true ]; then
-        if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
-            echo "error: No credentials and no cached session. Configure .env and run again."
-            exit 1
-        fi
-        echo "No cached session; starting server without login (x86_64)"
+        echo "error: No credentials and no cached session. Configure .env and run again."
+        exit 1
     else
         echo "Using cached session (no re-authentication needed)"
     fi

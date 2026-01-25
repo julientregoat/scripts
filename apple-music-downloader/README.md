@@ -23,10 +23,9 @@ Scripts for downloading lossless ALAC audio from Apple Music using a paid subscr
    # Edit .env and set your Apple Music credentials
    ```
    
-   **Note:** Credentials are **required on Apple Silicon** (arm64). The wrapper exits immediately without them.
-   On x86_64, credentials are optional but recommended.
+   **Note:** Credentials are **required**. The wrapper requires login credentials to function.
    
-   First-time setup requires 2FA - see [Apple Silicon setup](#apple-silicon-arm64---important) for details.
+   First-time setup requires 2FA - see [First-time setup with 2FA](#first-time-setup-with-2fa) for details.
 
 3. **Start wrapper:**
    ```bash
@@ -47,15 +46,15 @@ This setup uses two components:
 2. **apple-music-downloader** ([zhaarey/apple-music-downloader](https://github.com/zhaarey/apple-music-downloader)) - Go-based downloader running in Docker. See [apple-music-downloader README](https://github.com/zhaarey/apple-music-downloader#readme) for all available options and features.
 
 **What we use from each:**
-- **wrapper:** Docker container (recommended method per wrapper docs), basic decryption functionality. Login credentials required on Apple Silicon, optional on x86_64.
+- **wrapper:** Docker container (recommended method per wrapper docs), basic decryption functionality. Login credentials required.
 - **apple-music-downloader:** Docker image, default ALAC format (lossless), basic download functionality.
 
 ## Scripts
 
-### `wrapper_utils.sh` - Shared wrapper utilities (internal)
+### `utils.sh` - Shared utilities (internal)
 
 Shared script used by `setup.sh`, `wrapper.sh`, and other scripts. Provides:
-- Architecture detection for wrapper binary and image selection
+- Generic system architecture detection (`SYSTEM_ARCH`)
 
 Not typically run directly by users.
 
@@ -153,12 +152,11 @@ This script is also used internally by `download_apple_music.sh` for format vali
 
 ### Environment Variables (`.env` file)
 
-**The `.env` file is optional!** The script works with sensible defaults:
+**The `.env` file is required for credentials!** The script works with sensible defaults for other settings:
 - Wrapper host: `127.0.0.1`, port: `10020`
 - Output directory: `~/Downloads`
-- No credentials needed (wrapper can decrypt without them)
 
-Only create `.env` if you want to customize these settings.
+You must create `.env` and configure credentials for the wrapper to function.
 
 To create and configure:
 
@@ -168,7 +166,7 @@ cp .env.template .env
 ```
 
 **Settings:**
-- `APPLE_MUSIC_USERNAME` / `APPLE_MUSIC_PASSWORD` - Login credentials for wrapper. **Required on Apple Silicon** (wrapper exits without them). Optional on x86_64.
+- `APPLE_MUSIC_USERNAME` / `APPLE_MUSIC_PASSWORD` - Login credentials for wrapper. **Required** - wrapper requires credentials to function.
 - `APPLE_MUSIC_WRAPPER_HOST` - Wrapper host (default: 127.0.0.1)
 - `APPLE_MUSIC_WRAPPER_PORT` - Wrapper port (default: 10020)
 - `APPLE_MUSIC_MEDIA_USER_TOKEN` - **Not required for basic ALAC downloads**, but required for:
@@ -251,8 +249,9 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 **Note:** All dependencies except Docker are automatically installed/updated by `./setup.sh`. You only need to install Docker manually.
 
 **Platform Compatibility:**
-- **Apple Silicon (arm64):** Requires credentials (see [Apple Silicon setup](#apple-silicon-arm64---important)). Uses native arm64 wrapper binaries. Downloader uses Rosetta 2. **Local Apple Silicon works with single-track downloads** but the wrapper can crash with albums or too many tracks; see [Decryption fails](#decryption-fails-on-apple-silicon-connection-reset-by-peer).
-- **x86_64 (Intel Mac/Linux):** Uses native x86_64 wrapper binaries and Docker images. Credentials optional but recommended.
+- **Apple Silicon (arm64):** Uses native arm64 wrapper binaries. Downloader uses Rosetta 2. **Local Apple Silicon works with single-track downloads** but the wrapper can crash with albums or too many tracks; see [Decryption fails](#decryption-fails-on-apple-silicon-connection-reset-by-peer).
+- **x86_64 (Intel Mac/Linux):** Uses native x86_64 wrapper binaries and Docker images.
+- **Credentials:** Required on all platforms - wrapper requires login credentials to function.
 
 ## Troubleshooting
 
@@ -308,13 +307,9 @@ which MP4Box || which mp4box
 brew reinstall gpac  # macOS
 ```
 
-### Apple Silicon (arm64) - IMPORTANT
+### First-time setup with 2FA
 
-**Credentials are REQUIRED on Apple Silicon.** The arm64 wrapper binary exits immediately without login credentials. This is a known limitation.
-
-**Single-track vs albums:** Local Apple Silicon **works with single-track (song) downloads** but the wrapper can **crash with albums or too many tracks** during decryption. See [Decryption fails](#decryption-fails-on-apple-silicon-connection-reset-by-peer) for workarounds.
-
-**First-time setup with 2FA:**
+**Credentials are REQUIRED** - the wrapper requires login credentials to function on all platforms.
 
 1. **Configure credentials:**
    ```bash
@@ -346,6 +341,10 @@ brew reinstall gpac  # macOS
 ```bash
 ./wrapper.sh login
 ```
+
+### Apple Silicon (arm64) - IMPORTANT
+
+**Single-track vs albums:** Local Apple Silicon **works with single-track (song) downloads** but the wrapper can **crash with albums or too many tracks** during decryption. See [Decryption fails](#decryption-fails-on-apple-silicon-connection-reset-by-peer) for workarounds.
 
 **Technical details:**
 - **Wrapper binary:** Uses native arm64 binary compiled with Android NDK, linking against Android Apple Music app libraries
