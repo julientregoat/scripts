@@ -53,8 +53,7 @@ start_wrapper() {
     fi
 
     # Check for credentials on Apple Silicon (required - wrapper exits without them)
-    SYSTEM_ARCH=$(uname -m)
-    if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+    if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
         if [ -z "$APPLE_MUSIC_USERNAME" ] || [ -z "$APPLE_MUSIC_PASSWORD" ]; then
             echo "error: Apple Music credentials are REQUIRED on Apple Silicon"
             echo ""
@@ -77,11 +76,11 @@ start_wrapper() {
     echo "Starting wrapper (Docker container)..."
     
     # Show architecture information
-    if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
-        echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: arm64 (native)"
+    if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+        echo "System: arm64 (Apple Silicon) | Wrapper: arm64 (native)"
         echo "Note: Album/multi-track downloads may crash the wrapper; single-track downloads often work. See README → Decryption fails."
     else
-        echo "System: $SYSTEM_ARCH | Wrapper: $WRAPPER_ARCH"
+        echo "System: x86_64 | Wrapper: $WRAPPER_ARCH"
     fi
 
     echo "Host: $WRAPPER_HOST"
@@ -170,7 +169,7 @@ start_wrapper() {
         echo "Session cached. Starting server..."
         echo ""
     elif [ "$NEED_LOGIN" = true ]; then
-        if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+        if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
             echo "error: No credentials and no cached session. Configure .env and run again."
             exit 1
         fi

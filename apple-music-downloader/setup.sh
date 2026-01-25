@@ -6,6 +6,10 @@ set -e
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source shared wrapper utilities (includes architecture detection)
+source "$SCRIPT_DIR/wrapper_utils.sh"
+
 DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
 # WRAPPER_IMAGE will be set based on architecture (includes platform suffix)
 WRAPPER_IMAGE_BASE="apple-music-wrapper"
@@ -19,7 +23,7 @@ echo "============================"
 echo ""
 
 # Note about Apple Silicon requirements
-if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
     echo "ℹ️  Apple Silicon detected: Using native arm64 binary"
     echo ""
     echo "   IMPORTANT: Credentials are REQUIRED on Apple Silicon."
@@ -113,21 +117,16 @@ fi
 
 cd "$WRAPPER_REPO_DIR"
 
-# Detect architecture and download latest binary
-# Source shared wrapper utilities (includes architecture detection and runtime utilities)
-source "$SCRIPT_DIR/wrapper_utils.sh"
-
 # Set image name with platform suffix for clarity
 WRAPPER_IMAGE="${WRAPPER_IMAGE_BASE}-${WRAPPER_IMAGE_SUFFIX}"
 
 # Show clear architecture information
-SYSTEM_ARCH=$(uname -m)
-if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
-    echo "System architecture: $SYSTEM_ARCH (Apple Silicon)"
+if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+    echo "System architecture: arm64 (Apple Silicon)"
     echo "Using wrapper: arm64 (native)"
     echo "Wrapper image: $WRAPPER_IMAGE"
 else
-    echo "System architecture: $SYSTEM_ARCH"
+    echo "System architecture: x86_64"
     echo "Using wrapper: $WRAPPER_ARCH"
     echo "Wrapper image: $WRAPPER_IMAGE"
 fi
@@ -266,10 +265,9 @@ fi
 # Pull downloader image
 # Note: The downloader image only has x86_64 builds, so on arm64 we need to use --platform
 echo "Pulling downloader image..."
-ARCH=$(uname -m)
-if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
+if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
     # On Apple Silicon, pull with platform flag (image will use Rosetta 2)
-    echo "System: $ARCH (Apple Silicon) | Downloader: x86_64 (no arm64 build available - using Rosetta 2)"
+    echo "System: arm64 (Apple Silicon) | Downloader: x86_64 (no arm64 build available - using Rosetta 2)"
     if docker pull --platform linux/amd64 "$DOWNLOADER_IMAGE" 2>/dev/null; then
         echo "✓ Downloader image ready: $DOWNLOADER_IMAGE"
     else
@@ -281,7 +279,7 @@ if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
     fi
 else
     # On x86_64, try normal pull
-    echo "System: $ARCH | Downloader: x86_64"
+    echo "System: x86_64 | Downloader: x86_64"
     if docker pull "$DOWNLOADER_IMAGE" 2>/dev/null; then
         echo "✓ Downloader image ready: $DOWNLOADER_IMAGE"
     else
@@ -297,8 +295,7 @@ echo ""
 echo "Setup complete!"
 echo ""
 
-SYSTEM_ARCH=$(uname -m)
-if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
     echo "Next steps (Apple Silicon):"
     echo "1. Configure credentials: cp .env.template .env && edit .env"
     echo "   (REQUIRED - wrapper exits without credentials on Apple Silicon)"
