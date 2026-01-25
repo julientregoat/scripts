@@ -256,7 +256,7 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 **Note:** All dependencies except Docker are automatically installed/updated by `./setup.sh`. You only need to install Docker manually.
 
 **Platform Compatibility:**
-- **Apple Silicon (arm64):** Requires credentials (see [Apple Silicon setup](#apple-silicon-arm64---important)). Uses native arm64 wrapper binaries. Downloader uses Rosetta 2.
+- **Apple Silicon (arm64):** Requires credentials (see [Apple Silicon setup](#apple-silicon-arm64---important)). Uses native arm64 wrapper binaries. Downloader uses Rosetta 2. **Local Apple Silicon works with single-track downloads** but the wrapper can crash with albums or too many tracks; see [Decryption fails](#decryption-fails-on-apple-silicon-connection-reset-by-peer).
 - **x86_64 (Intel Mac/Linux):** Uses native x86_64 wrapper binaries and Docker images. Credentials optional but recommended.
 
 ## Troubleshooting
@@ -285,7 +285,7 @@ This is a known limitation of the prebuilt arm64 wrapper binary ([wrapper issue 
 **Workarounds:**
 
 1. **Retry** – The downloader retries on error. Run the download again; it may succeed after the wrapper has restarted.
-2. **Download fewer tracks** – Try a single song or a smaller album. Multiple concurrent decrypt streams can increase the chance of a crash.
+2. **Download one track at a time** – Use **song URLs** instead of album URLs. Single-track downloads often succeed when album downloads crash; sustained decrypt load across many tracks appears to trigger the failure.
 3. **Use remote decryption** – [AppleMusicDecrypt](https://github.com/WorldObservationLog/AppleMusicDecrypt) can use a remote `wrapper-manager` (e.g. `wm.wol.moe`) instead of a local wrapper, avoiding the arm64 decrypt crash.
 4. **Use x86_64 Linux** – The x86_64 wrapper is more stable; use a Linux x86_64 machine or VM if you need reliable decryption.
 
@@ -316,6 +316,8 @@ brew reinstall gpac  # macOS
 ### Apple Silicon (arm64) - IMPORTANT
 
 **Credentials are REQUIRED on Apple Silicon.** The arm64 wrapper binary exits immediately without login credentials. This is a known limitation.
+
+**Single-track vs albums:** Local Apple Silicon **works with single-track (song) downloads** but the wrapper can **crash with albums or too many tracks** during decryption. See [Decryption fails](#decryption-fails-on-apple-silicon-connection-reset-by-peer) for workarounds.
 
 **First-time setup with 2FA:**
 

@@ -79,10 +79,11 @@ start_wrapper() {
     # Show architecture information
     if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
         echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: arm64 (native)"
+        echo "Note: Album/multi-track downloads may crash the wrapper; single-track downloads often work. See README → Decryption fails."
     else
         echo "System: $SYSTEM_ARCH | Wrapper: $WRAPPER_ARCH"
     fi
-    
+
     echo "Host: $WRAPPER_HOST"
     echo "Ports: $WRAPPER_PORT (decrypt), $WRAPPER_M3U8_PORT (m3u8), $WRAPPER_ACCOUNT_PORT (account)"
     if [ -n "$APPLE_MUSIC_USERNAME" ]; then

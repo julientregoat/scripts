@@ -287,7 +287,7 @@ reorganize_files 2>/dev/null || true
 echo "Downloading from Apple Music..."
 
 # Show architecture information
-ARCH=$(uname -m)
+ARCH=${ARCH:-$(uname -m)}
 if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
     echo "System: $ARCH (Apple Silicon) | Downloader: x86_64 (no arm64 build available - using Rosetta 2)"
 else
@@ -304,6 +304,12 @@ else
 fi
 echo "Output: $OUTPUT_DIR"
 echo ""
+
+# Warn on Apple Silicon (arm64): local wrapper can crash with albums/multiple tracks
+if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
+    echo "⚠️  Apple Silicon: The local wrapper may crash during decryption when downloading albums or multiple tracks. Single-track (song) downloads often work. See README → Troubleshooting → Decryption fails."
+    echo ""
+fi
 
 # Run downloader in Docker
 # --network host: allows access to localhost wrapper
