@@ -192,19 +192,8 @@ if ! command -v MP4Box &> /dev/null && ! command -v mp4box &> /dev/null; then
     exit 1
 fi
 
-# Check if wrapper is accessible
-check_wrapper() {
-    if command -v timeout &> /dev/null; then
-        timeout 1 bash -c "echo > /dev/tcp/$WRAPPER_HOST/$WRAPPER_PORT" 2>/dev/null
-    elif command -v nc &> /dev/null; then
-        nc -z "$WRAPPER_HOST" "$WRAPPER_PORT" 2>/dev/null
-    else
-        return 1
-    fi
-}
-
 # Check if wrapper is running
-if ! check_wrapper; then
+if ! check_port "$WRAPPER_HOST" "$WRAPPER_PORT"; then
     echo "error: Wrapper server not reachable at $WRAPPER_HOST:$WRAPPER_PORT"
     echo ""
     echo "The wrapper (decryption server) must be running before downloading."
@@ -279,7 +268,7 @@ fi
 docker_args+=("${URLS[@]}")
 
 # Check if a download container is already running
-if docker ps --format '{{.Names}}' | grep -q "^${DOWNLOADER_CONTAINER}$" 2>/dev/null; then
+if container_is_running "$DOWNLOADER_CONTAINER"; then
     echo "⚠️  Warning: A download container is already running: $DOWNLOADER_CONTAINER"
     echo ""
     echo "Please wait for the current download to finish, or stop it with:"
@@ -290,7 +279,7 @@ if docker ps --format '{{.Names}}' | grep -q "^${DOWNLOADER_CONTAINER}$" 2>/dev/
 fi
 
 # Clean up any stopped container with the same name (from --rm, should be rare)
-if docker ps -a --format '{{.Names}}' | grep -q "^${DOWNLOADER_CONTAINER}$" 2>/dev/null; then
+if container_exists "$DOWNLOADER_CONTAINER"; then
     docker rm "$DOWNLOADER_CONTAINER" >/dev/null 2>&1 || true
 fi
 

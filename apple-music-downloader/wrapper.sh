@@ -34,12 +34,8 @@ if [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
     WRAPPER_ARGS="$WRAPPER_ARGS -L $APPLE_MUSIC_USERNAME:$APPLE_MUSIC_PASSWORD"
 fi
 
-is_running() {
-    docker ps --format '{{.Names}}' | grep -q "^${WRAPPER_CONTAINER}$" 2>/dev/null
-}
-
 start_wrapper() {
-    if is_running; then
+    if container_is_running "$WRAPPER_CONTAINER"; then
         echo "Wrapper is already running (container: $WRAPPER_CONTAINER)"
         return 0
     fi
@@ -108,7 +104,7 @@ start_wrapper() {
     # -------- Phase 1: Login (only when no cache or FORCE_LOGIN) --------
     if [ "$NEED_LOGIN" = true ] && [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
         echo "Session not cached - authenticating first..."
-        docker rm -f "$LOGIN_CONTAINER" 2>/dev/null || true
+        cleanup_container "$LOGIN_CONTAINER"
 
         if ! docker run -d \
             --name "$LOGIN_CONTAINER" \
@@ -138,8 +134,7 @@ start_wrapper() {
                 echo "Waiting for authentication..."
                 sleep 5
             else
-                docker stop "$LOGIN_CONTAINER" 2>/dev/null || true
-                docker rm "$LOGIN_CONTAINER" 2>/dev/null || true
+                cleanup_container "$LOGIN_CONTAINER"
                 echo "No code entered. Login aborted."
                 exit 1
             fi
@@ -152,13 +147,14 @@ start_wrapper() {
                 echo "✓ Authentication successful"
                 break
             fi
-            docker ps -q -f "name=^${LOGIN_CONTAINER}$" 2>/dev/null | grep -q . || break
+            if ! container_is_running "$LOGIN_CONTAINER"; then
+                break
+            fi
             sleep 1
             i=$((i + 1))
         done
 
-        docker stop "$LOGIN_CONTAINER" 2>/dev/null || true
-        docker rm "$LOGIN_CONTAINER" 2>/dev/null || true
+        cleanup_container "$LOGIN_CONTAINER"
 
         if [ ! -f "$SESSION_FILE" ] || [ ! -s "$SESSION_FILE" ]; then
             echo "error: Authentication failed or session not cached. Check logs and try again."
@@ -174,7 +170,7 @@ start_wrapper() {
     fi
 
     # -------- Phase 2: Server (always -H only; restarts use cached session) --------
-    docker rm -f "$WRAPPER_CONTAINER" 2>/dev/null || true
+    cleanup_container "$WRAPPER_CONTAINER"
 
     if ! docker run -d \
         --name "$WRAPPER_CONTAINER" \
@@ -190,7 +186,7 @@ start_wrapper() {
     fi
 
     sleep 2
-    if is_running; then
+    if container_is_running "$WRAPPER_CONTAINER"; then
         echo "✓ Wrapper started (container: $WRAPPER_CONTAINER)"
         echo "View logs: docker logs $WRAPPER_CONTAINER"
     else
@@ -201,11 +197,11 @@ start_wrapper() {
 }
 
 stop_wrapper() {
-    if ! is_running; then
+    if ! container_is_running "$WRAPPER_CONTAINER"; then
         echo "Wrapper is not running"
         # Clean up stopped containers if they exist
         for c in "$WRAPPER_CONTAINER" "$LOGIN_CONTAINER"; do
-            if docker ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
+            if container_exists "$c"; then
                 echo "Removing stopped container: $c"
                 docker rm "$c" > /dev/null 2>&1 || true
             fi
@@ -214,18 +210,14 @@ stop_wrapper() {
     fi
 
     echo "Stopping wrapper (container: $WRAPPER_CONTAINER)..."
-    docker stop "$WRAPPER_CONTAINER" > /dev/null 2>&1 || true
-    docker stop "$LOGIN_CONTAINER" > /dev/null 2>&1 || true
-
-    sleep 1
-    docker rm "$WRAPPER_CONTAINER" > /dev/null 2>&1 || true
-    docker rm "$LOGIN_CONTAINER" > /dev/null 2>&1 || true
+    cleanup_container "$WRAPPER_CONTAINER"
+    cleanup_container "$LOGIN_CONTAINER"
 
     echo "✓ Wrapper stopped"
 }
 
 status_wrapper() {
-    if is_running; then
+    if container_is_running "$WRAPPER_CONTAINER"; then
         echo "Wrapper is running (container: $WRAPPER_CONTAINER)"
         echo "Host: $WRAPPER_HOST"
         echo "Ports: $WRAPPER_PORT (decrypt), $WRAPPER_M3U8_PORT (m3u8), $WRAPPER_ACCOUNT_PORT (account)"
@@ -234,17 +226,15 @@ status_wrapper() {
         docker ps --filter "name=$WRAPPER_CONTAINER" --format "Container: {{.Names}} ({{.Status}})"
         
         # Test connectivity
-        if command -v timeout &> /dev/null; then
-            if timeout 1 bash -c "echo > /dev/tcp/$WRAPPER_HOST/$WRAPPER_PORT" 2>/dev/null; then
-                echo "✓ Port $WRAPPER_PORT is accessible"
-            else
-                echo "⚠️  Port $WRAPPER_PORT is not accessible"
-            fi
+        if check_port "$WRAPPER_HOST" "$WRAPPER_PORT"; then
+            echo "✓ Port $WRAPPER_PORT is accessible"
+        else
+            echo "⚠️  Port $WRAPPER_PORT is not accessible"
         fi
     else
         echo "Wrapper is not running"
         # Check if container exists but is stopped
-        if docker ps -a --format '{{.Names}}' | grep -q "^${WRAPPER_CONTAINER}$"; then
+        if container_exists "$WRAPPER_CONTAINER"; then
             echo "Container exists but is stopped. Start with: ./wrapper.sh start"
         fi
         return 1
