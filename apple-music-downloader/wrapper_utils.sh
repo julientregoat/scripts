@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # Shared utility functions and configuration for wrapper-related scripts
 # Can be sourced: source wrapper_utils.sh
-#
-# Environment variable override:
-#   USE_WRAPPER_X86_64=1  - Force x86_64 binary on Apple Silicon (uses QEMU emulation, may crash)
-#                           Default on Apple Silicon is arm64 (native, recommended)
 
 # ============================================================================
 # Architecture Detection
@@ -15,28 +11,22 @@
 #
 # Note: The wrapper binary is compiled with Android NDK and links against Android
 # Apple Music app libraries. This is by design - it's how the decryption works.
+#
+# Apple Silicon: Must use arm64 binary (x86_64 crashes with QEMU segfaults)
+# x86_64: Uses native x86_64 binary
 
 _detect_wrapper_architecture() {
     # Detect architecture
     local ARCH=$(uname -m)
 
     if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
-        # On Apple Silicon, default to arm64 (native, no emulation needed)
-        # User can set USE_WRAPPER_X86_64=1 to force x86_64 (uses QEMU, may crash)
-        if [[ "${USE_WRAPPER_X86_64}" == "1" ]]; then
-            WRAPPER_ARCH="x86_64"
-            BINARY_PATTERN="Wrapper.x86_64"
-            FALLBACK_ARCH="arm64"
-            FALLBACK_PATTERN="Wrapper.arm64"
-            WRAPPER_IMAGE_SUFFIX="x86_64"
-        else
-            # Default: use arm64 on Apple Silicon (native, recommended)
-            WRAPPER_ARCH="arm64"
-            BINARY_PATTERN="Wrapper.arm64"
-            FALLBACK_ARCH="x86_64"
-            FALLBACK_PATTERN="Wrapper.x86_64"
-            WRAPPER_IMAGE_SUFFIX="arm64"
-        fi
+        # Apple Silicon: Must use arm64 binary
+        # x86_64 binary requires QEMU emulation which crashes with segfaults
+        WRAPPER_ARCH="arm64"
+        BINARY_PATTERN="Wrapper.arm64"
+        FALLBACK_ARCH=""
+        FALLBACK_PATTERN=""
+        WRAPPER_IMAGE_SUFFIX="arm64"
     elif [[ "$ARCH" == "x86_64" ]]; then
         WRAPPER_ARCH="x86_64"
         BINARY_PATTERN="Wrapper.x86_64"

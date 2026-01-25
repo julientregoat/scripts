@@ -17,18 +17,16 @@ Scripts for downloading lossless ALAC audio from Apple Music using a paid subscr
    - Build the wrapper Docker image
    - Pull the downloader Docker image
 
-2. **Configure (optional):**
+2. **Configure credentials:**
    ```bash
    cp .env.template .env
-   # Edit .env if you want to customize settings
+   # Edit .env and set your Apple Music credentials
    ```
    
-   **Note:** The `.env` file is **optional**. The script works with defaults:
-   - Wrapper host: 127.0.0.1, port: 10020
-   - Output directory: ~/Downloads
-   - No credentials needed (wrapper can work without them)
+   **Note:** Credentials are **required on Apple Silicon** (arm64). The wrapper exits immediately without them.
+   On x86_64, credentials are optional but recommended.
    
-   Only create `.env` if you want to customize these settings or add credentials.
+   First-time setup requires 2FA - see [Apple Silicon setup](#apple-silicon-arm64---important) for details.
 
 3. **Start wrapper (or use --auto-wrapper):**
    ```bash
@@ -50,7 +48,7 @@ This setup uses two components:
 2. **apple-music-downloader** ([zhaarey/apple-music-downloader](https://github.com/zhaarey/apple-music-downloader)) - Go-based downloader running in Docker. See [apple-music-downloader README](https://github.com/zhaarey/apple-music-downloader#readme) for all available options and features.
 
 **What we use from each:**
-- **wrapper:** Docker container (recommended method per wrapper docs), basic decryption functionality. Login credentials optional (can work without).
+- **wrapper:** Docker container (recommended method per wrapper docs), basic decryption functionality. Login credentials required on Apple Silicon, optional on x86_64.
 - **apple-music-downloader:** Docker image, default ALAC format (lossless), basic download functionality.
 
 ## Scripts
@@ -123,9 +121,8 @@ Automatically installs and updates dependencies:
 - Clones/updates wrapper repository
 - Downloads latest prebuilt binary from releases (detects architecture automatically)
   - Handles zip file downloads and extraction automatically
-  - On Apple Silicon (arm64), uses native arm64 binary by default (recommended)
+  - On Apple Silicon (arm64), uses native arm64 binary (required - x86_64 crashes with QEMU)
   - On x86_64, uses x86_64 binary
-  - Set `USE_WRAPPER_X86_64=1` to force x86_64 on Apple Silicon (not recommended, may crash)
 - Builds/rebuilds wrapper Docker image with platform-specific naming (e.g., `apple-music-wrapper-arm64`, `apple-music-wrapper-x86_64`)
   - Automatically cleans up old wrapper images before building
   - Rebuilds if binary is newer
@@ -174,8 +171,8 @@ cp .env.template .env
 # Edit .env if you want to customize settings
 ```
 
-**Optional settings:**
-- `APPLE_MUSIC_USERNAME` / `APPLE_MUSIC_PASSWORD` - Login credentials for wrapper. **Not required** - wrapper can decrypt without them. Only needed for certain authentication scenarios. Basic ALAC downloads work without credentials.
+**Settings:**
+- `APPLE_MUSIC_USERNAME` / `APPLE_MUSIC_PASSWORD` - Login credentials for wrapper. **Required on Apple Silicon** (wrapper exits without them). Optional on x86_64.
 - `APPLE_MUSIC_WRAPPER_HOST` - Wrapper host (default: 127.0.0.1)
 - `APPLE_MUSIC_WRAPPER_PORT` - Wrapper port (default: 10020)
 - `APPLE_MUSIC_AUTO_WRAPPER` - Auto-wrapper behavior (equivalent to `--auto-wrapper` flag, default: false)
@@ -259,8 +256,8 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 **Note:** All dependencies except Docker are automatically installed/updated by `./setup.sh`. You only need to install Docker manually.
 
 **Platform Compatibility:**
-- **Apple Silicon (arm64):** Uses native arm64 wrapper binaries and Docker images by default (no emulation). The downloader uses `--platform linux/amd64` to run x86_64 images via Rosetta 2.
-- **x86_64 (Intel Mac/Linux):** Uses native x86_64 wrapper binaries and Docker images. The downloader uses `--platform linux/amd64` flag.
+- **Apple Silicon (arm64):** Requires credentials (see [Apple Silicon setup](#apple-silicon-arm64---important)). Uses native arm64 wrapper binaries. Downloader uses Rosetta 2.
+- **x86_64 (Intel Mac/Linux):** Uses native x86_64 wrapper binaries and Docker images. Credentials optional but recommended.
 
 ## Troubleshooting
 
@@ -276,18 +273,97 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 - Verify Apple Music subscription is active
 - Check Docker is running: `docker ps`
 
+### Decryption fails on Apple Silicon (connection reset by peer)
+
+The arm64 wrapper can **crash during decryption** while the downloader is running. You’ll see errors like:
+
+- `decryptFragment: read tcp ... 127.0.0.1:10020: read: connection reset by peer`
+- `dial tcp 127.0.0.1:10020: connect: connection refused` (wrapper down, restarting)
+
+This is a known limitation of the prebuilt arm64 wrapper binary ([wrapper issue #8](https://github.com/WorldObservationLog/wrapper/issues/8)). The wrapper exits (often exit code 137 / SIGKILL, sometimes OOM), Docker restarts it with the cached session, but the current download fails.
+
+**Check if it’s OOM:** After a crash, inspect the container exit code. Exit **137** (128 + SIGKILL) often means the process was OOM‑killed:
+
+```bash
+docker inspect apple-music-wrapper --format '{{.State.ExitCode}}'
+# 137 = likely OOM; 0 = clean exit
+docker ps -a --filter name=apple-music-wrapper --format '{{.Names}} {{.Status}}'
+# e.g. "Exited (137) 2 minutes ago"
+```
+
+**Workarounds:**
+
+1. **Retry** – The downloader retries on error. Run the download again; it may succeed after the wrapper has restarted.
+2. **Download fewer tracks** – Try a single song or a smaller album. Multiple concurrent decrypt streams can increase the chance of a crash.
+3. **Use remote decryption** – [AppleMusicDecrypt](https://github.com/WorldObservationLog/AppleMusicDecrypt) can use a remote `wrapper-manager` (e.g. `wm.wol.moe`) instead of a local wrapper, avoiding the arm64 decrypt crash.
+4. **Use x86_64 Linux** – The x86_64 wrapper is more stable; use a Linux x86_64 machine or VM if you need reliable decryption.
+
+### "You've reached your device limit" (Apple Music)
+
+If the wrapper shows:
+
+```
+dialogHandler: {title: You've Reached Your Device Limit, message: You have reached the limit on the maximum number of concurrent playing devices.}
+```
+
+Apple Music limits how many devices can use your subscription at once. Too many logins (e.g. repeated `./wrapper.sh login` or 2FA retries) can hit this.
+
+**What to do:**
+
+1. **Stop creating new sessions** – `./wrapper.sh stop` and avoid `./wrapper.sh login` until you’ve freed devices.
+2. **Sign out of Apple Music** on devices you’re not using (other computers, old phones, tablets).
+3. **Remove old devices** – [appleid.apple.com](https://appleid.apple.com) → Sign-In and Security → Devices → remove unused devices.
+4. **Wait** – Limits sometimes reset after a short cooldown.
+5. **Use cached session** – When you retry, use `./wrapper.sh start` only (no `login`). The wrapper reuses the cached session and doesn’t create a new device each time.
+
 ### MP4Box not found
 ```bash
 which MP4Box || which mp4box
 brew reinstall gpac  # macOS
 ```
 
-### Apple Silicon (arm64) / Architecture Issues
-- **Wrapper binary:** On Apple Silicon, **defaults to native arm64 binary** (recommended). The wrapper binary is compiled with Android NDK and links against Android Apple Music app libraries - this is by design for decryption to work.
-- **Wrapper Docker image:** Built from the arm64 branch on Apple Silicon (or main branch on x86_64). The Dockerfile handles platform configuration internally. Named `apple-music-wrapper-arm64` or `apple-music-wrapper-x86_64` for clarity.
-- **Downloader image:** The downloader image doesn't have native arm64 builds yet. The scripts automatically use `--platform linux/amd64` to run x86_64 images via Rosetta 2. This works transparently.
-- **x86_64 binary on Apple Silicon:** Not recommended. Running x86_64 Android NDK binaries on Apple Silicon requires QEMU emulation (not Rosetta 2), which often crashes with segmentation faults. Use native arm64 instead.
-- **Troubleshooting:** If the wrapper container is restarting or crashing, check logs with `docker logs apple-music-wrapper`. If using x86_64 binary on Apple Silicon and seeing QEMU segfaults, switch to arm64 (the default).
+### Apple Silicon (arm64) - IMPORTANT
+
+**Credentials are REQUIRED on Apple Silicon.** The arm64 wrapper binary exits immediately without login credentials. This is a known limitation.
+
+**First-time setup with 2FA:**
+
+1. **Configure credentials:**
+   ```bash
+   cp .env.template .env
+   # Edit .env and set APPLE_MUSIC_USERNAME and APPLE_MUSIC_PASSWORD
+   ```
+
+2. **Start the wrapper:**
+   ```bash
+   ./wrapper.sh start
+   ```
+
+3. **Enter 2FA code (60 second timeout):**
+   When the wrapper prompts for 2FA, write the code to the data directory:
+   ```bash
+   echo -n 123456 > data/data/com.apple.android.music/files/2fa.txt
+   ```
+   (Replace `123456` with your actual 2FA code)
+
+4. **Verify it's running:**
+   ```bash
+   docker logs apple-music-wrapper
+   # Should show: [!] listening 0.0.0.0:10020
+   ```
+
+**Session caching:** Once authenticated, the session is cached in `data/`. The wrapper will automatically use the cached session on subsequent starts - no 2FA needed unless the cache is cleared.
+
+**Re-authentication:** If you need to re-authenticate (session expired, credentials changed), use:
+```bash
+./wrapper.sh login
+```
+
+**Technical details:**
+- **Wrapper binary:** Uses native arm64 binary compiled with Android NDK, linking against Android Apple Music app libraries
+- **Wrapper Docker image:** Named `apple-music-wrapper-arm64`
+- **Downloader image:** Uses `--platform linux/amd64` to run x86_64 images via Rosetta 2 (no native arm64 build available)
+- **x86_64 wrapper on Apple Silicon:** Not supported - QEMU emulation crashes with segmentation faults
 
 ## Checking if Lossless is Available
 

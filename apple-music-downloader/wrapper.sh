@@ -13,6 +13,7 @@ source "$SCRIPT_DIR/wrapper_utils.sh"
 DEFAULT_WRAPPER_IMAGE="apple-music-wrapper-${WRAPPER_IMAGE_SUFFIX}"
 WRAPPER_IMAGE="${APPLE_MUSIC_WRAPPER_IMAGE:-$DEFAULT_WRAPPER_IMAGE}"
 WRAPPER_CONTAINER="${APPLE_MUSIC_WRAPPER_CONTAINER:-apple-music-wrapper}"
+LOGIN_CONTAINER="${WRAPPER_CONTAINER}-login"
 WRAPPER_DATA_DIR="$SCRIPT_DIR/data"
 
 # Load .env if it exists
@@ -51,19 +52,33 @@ start_wrapper() {
         exit 1
     fi
 
-    # Create data directory if it doesn't exist
+    # Check for credentials on Apple Silicon (required - wrapper exits without them)
+    SYSTEM_ARCH=$(uname -m)
+    if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+        if [ -z "$APPLE_MUSIC_USERNAME" ] || [ -z "$APPLE_MUSIC_PASSWORD" ]; then
+            echo "error: Apple Music credentials are REQUIRED on Apple Silicon"
+            echo ""
+            echo "The wrapper exits immediately without credentials on arm64."
+            echo ""
+            echo "To configure:"
+            echo "  1. Copy .env.template to .env"
+            echo "  2. Set APPLE_MUSIC_USERNAME and APPLE_MUSIC_PASSWORD"
+            echo "  3. Run ./wrapper.sh start again"
+            echo ""
+            echo "First-time setup requires 2FA - see .env.template for instructions"
+            exit 1
+        fi
+    fi
+
+    # Create data directory and 2FA file directory
     mkdir -p "$WRAPPER_DATA_DIR"
+    mkdir -p "$WRAPPER_DATA_DIR/data/com.apple.android.music/files"
 
     echo "Starting wrapper (Docker container)..."
     
     # Show architecture information
-    SYSTEM_ARCH=$(uname -m)
     if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
-        if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
-            echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: arm64 (native)"
-        else
-            echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: x86_64 (QEMU)"
-        fi
+        echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: arm64 (native)"
     else
         echo "System: $SYSTEM_ARCH | Wrapper: $WRAPPER_ARCH"
     fi
@@ -71,73 +86,146 @@ start_wrapper() {
     echo "Host: $WRAPPER_HOST"
     echo "Ports: $WRAPPER_PORT (decrypt), $WRAPPER_M3U8_PORT (m3u8), $WRAPPER_ACCOUNT_PORT (account)"
     if [ -n "$APPLE_MUSIC_USERNAME" ]; then
-        echo "Using login credentials"
+        echo "Using login credentials: $APPLE_MUSIC_USERNAME"
     else
-        echo "Running without login (credentials not set)"
+        echo "Running without login credentials"
     fi
     echo ""
 
-    # Build Docker run command
-    # The image was built for the correct architecture, no need to specify platform
-    local docker_args=(
-        -d
-        --name "$WRAPPER_CONTAINER"
-        --restart unless-stopped
-        -v "$WRAPPER_DATA_DIR:/app/rootfs/data"
-        -p "$WRAPPER_PORT:$WRAPPER_PORT"
-        -p "$WRAPPER_M3U8_PORT:$WRAPPER_M3U8_PORT"
-        -p "$WRAPPER_ACCOUNT_PORT:$WRAPPER_ACCOUNT_PORT"
-    )
+    # Check if session is already cached (accounts.sqlitedb exists with content)
+    # Per wrapper docs: -L is ONLY for initial login; the long‑running server must use -H only.
+    # Using -L on the server container causes re-auth on every Docker restart (e.g. after crash
+    # during decryption), so we run a short-lived login container first, then the server.
+    local SESSION_FILE="$WRAPPER_DATA_DIR/data/com.apple.android.music/files/accounts.sqlitedb"
+    local NEED_LOGIN=false
 
-    # Add login credentials if provided
-    if [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
-        docker_args+=(-e "args=-L $APPLE_MUSIC_USERNAME:$APPLE_MUSIC_PASSWORD -H 0.0.0.0")
-    else
-        docker_args+=(-e "args=-H 0.0.0.0")
+    if [ ! -f "$SESSION_FILE" ] || [ ! -s "$SESSION_FILE" ]; then
+        NEED_LOGIN=true
+    fi
+    if [ "${FORCE_LOGIN:-}" = "1" ]; then
+        NEED_LOGIN=true
+        echo "Forcing re-authentication..."
     fi
 
-    docker_args+=("$WRAPPER_IMAGE")
+    # -------- Phase 1: Login (only when no cache or FORCE_LOGIN) --------
+    if [ "$NEED_LOGIN" = true ] && [ -n "$APPLE_MUSIC_USERNAME" ] && [ -n "$APPLE_MUSIC_PASSWORD" ]; then
+        echo "Session not cached - authenticating first..."
+        docker rm -f "$LOGIN_CONTAINER" 2>/dev/null || true
 
-    # Start container
-    if docker run "${docker_args[@]}" 2>&1; then
-        # Wait for container to initialize
-        sleep 2
-        
-        # Check if container is running
-        if is_running; then
-            echo "✓ Wrapper started (container: $WRAPPER_CONTAINER)"
-            echo "View logs: docker logs $WRAPPER_CONTAINER"
-        else
-            echo "⚠️  Container started but is not running. Check logs:"
-            echo "   docker logs $WRAPPER_CONTAINER"
-            docker logs "$WRAPPER_CONTAINER" 2>&1 | tail -10
-            return 1
+        if ! docker run -d \
+            --name "$LOGIN_CONTAINER" \
+            -v "$WRAPPER_DATA_DIR:/app/rootfs/data" \
+            -p "$WRAPPER_PORT:$WRAPPER_PORT" \
+            -p "$WRAPPER_M3U8_PORT:$WRAPPER_M3U8_PORT" \
+            -p "$WRAPPER_ACCOUNT_PORT:$WRAPPER_ACCOUNT_PORT" \
+            -e "args=-L $APPLE_MUSIC_USERNAME:$APPLE_MUSIC_PASSWORD -F -H 0.0.0.0" \
+            "$WRAPPER_IMAGE" 2>/dev/null; then
+            echo "error: Failed to start login container"
+            exit 1
         fi
+
+        sleep 3
+        local TWO_FA_FILE="$WRAPPER_DATA_DIR/data/com.apple.android.music/files/2fa.txt"
+
+        if docker logs "$LOGIN_CONTAINER" 2>&1 | grep -q "Waiting for input"; then
+            echo "⚠️  2FA Required"
+            echo ""
+            echo "The wrapper is waiting for your 2FA code (60 second timeout)."
+            echo ""
+            read -p "Enter your 2FA code: " TWO_FA_CODE
+
+            if [ -n "$TWO_FA_CODE" ]; then
+                echo -n "$TWO_FA_CODE" > "$TWO_FA_FILE"
+                echo "✓ 2FA code submitted"
+                echo "Waiting for authentication..."
+                sleep 5
+            else
+                docker stop "$LOGIN_CONTAINER" 2>/dev/null || true
+                docker rm "$LOGIN_CONTAINER" 2>/dev/null || true
+                echo "No code entered. Login aborted."
+                exit 1
+            fi
+        fi
+
+        # Wait for "listening" (auth success) or timeout
+        local i=0
+        while [ $i -lt 15 ]; do
+            if docker logs "$LOGIN_CONTAINER" 2>&1 | grep -q "listening.*10020"; then
+                echo "✓ Authentication successful"
+                break
+            fi
+            docker ps -q -f "name=^${LOGIN_CONTAINER}$" 2>/dev/null | grep -q . || break
+            sleep 1
+            i=$((i + 1))
+        done
+
+        docker stop "$LOGIN_CONTAINER" 2>/dev/null || true
+        docker rm "$LOGIN_CONTAINER" 2>/dev/null || true
+
+        if [ ! -f "$SESSION_FILE" ] || [ ! -s "$SESSION_FILE" ]; then
+            echo "error: Authentication failed or session not cached. Check logs and try again."
+            exit 1
+        fi
+        echo "Session cached. Starting server..."
+        echo ""
+    elif [ "$NEED_LOGIN" = true ]; then
+        if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+            echo "error: No credentials and no cached session. Configure .env and run again."
+            exit 1
+        fi
+        echo "No cached session; starting server without login (x86_64)"
     else
+        echo "Using cached session (no re-authentication needed)"
+    fi
+
+    # -------- Phase 2: Server (always -H only; restarts use cached session) --------
+    docker rm -f "$WRAPPER_CONTAINER" 2>/dev/null || true
+
+    if ! docker run -d \
+        --name "$WRAPPER_CONTAINER" \
+        --restart unless-stopped \
+        -v "$WRAPPER_DATA_DIR:/app/rootfs/data" \
+        -p "$WRAPPER_PORT:$WRAPPER_PORT" \
+        -p "$WRAPPER_M3U8_PORT:$WRAPPER_M3U8_PORT" \
+        -p "$WRAPPER_ACCOUNT_PORT:$WRAPPER_ACCOUNT_PORT" \
+        -e "args=-H 0.0.0.0" \
+        "$WRAPPER_IMAGE" 2>/dev/null; then
         echo "error: Failed to start wrapper container"
-        echo "Check Docker is running and try again"
         exit 1
+    fi
+
+    sleep 2
+    if is_running; then
+        echo "✓ Wrapper started (container: $WRAPPER_CONTAINER)"
+        echo "View logs: docker logs $WRAPPER_CONTAINER"
+    else
+        echo "⚠️  Container started but is not running. Check logs:"
+        docker logs "$WRAPPER_CONTAINER" 2>&1 | tail -15
+        return 1
     fi
 }
 
 stop_wrapper() {
     if ! is_running; then
         echo "Wrapper is not running"
-        # Clean up stopped container if it exists
-        if docker ps -a --format '{{.Names}}' | grep -q "^${WRAPPER_CONTAINER}$"; then
-            echo "Removing stopped container..."
-            docker rm "$WRAPPER_CONTAINER" > /dev/null 2>&1 || true
-        fi
+        # Clean up stopped containers if they exist
+        for c in "$WRAPPER_CONTAINER" "$LOGIN_CONTAINER"; do
+            if docker ps -a --format '{{.Names}}' | grep -q "^${c}$"; then
+                echo "Removing stopped container: $c"
+                docker rm "$c" > /dev/null 2>&1 || true
+            fi
+        done
         return 0
     fi
 
     echo "Stopping wrapper (container: $WRAPPER_CONTAINER)..."
     docker stop "$WRAPPER_CONTAINER" > /dev/null 2>&1 || true
-    
-    # Wait a moment, then remove container
+    docker stop "$LOGIN_CONTAINER" > /dev/null 2>&1 || true
+
     sleep 1
     docker rm "$WRAPPER_CONTAINER" > /dev/null 2>&1 || true
-    
+    docker rm "$LOGIN_CONTAINER" > /dev/null 2>&1 || true
+
     echo "✓ Wrapper stopped"
 }
 
@@ -180,18 +268,25 @@ case "${1:-}" in
         sleep 1
         start_wrapper
         ;;
+    login)
+        # Force re-authentication (useful if session expired or credentials changed)
+        stop_wrapper
+        sleep 1
+        FORCE_LOGIN=1 start_wrapper
+        ;;
     status)
         status_wrapper
         ;;
     *)
-        echo "usage: $0 {start|stop|restart|status}"
+        echo "usage: $0 {start|stop|restart|login|status}"
         echo ""
         echo "Manage the Apple Music wrapper (decryption server)"
         echo ""
         echo "Commands:"
-        echo "  start   - Start the wrapper server"
+        echo "  start   - Start the wrapper server (uses cached session if available)"
         echo "  stop    - Stop the wrapper server"
         echo "  restart - Restart the wrapper server"
+        echo "  login   - Force re-authentication (if session expired or credentials changed)"
         echo "  status  - Check if wrapper is running"
         echo ""
         echo "Configuration:"

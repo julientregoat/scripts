@@ -18,18 +18,16 @@ echo "Apple Music Downloader Setup"
 echo "============================"
 echo ""
 
-# Note about architecture selection
+# Note about Apple Silicon requirements
 if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
-    if [[ "${USE_WRAPPER_X86_64}" == "1" ]]; then
-        echo "⚠️  Using x86_64 binary (USE_WRAPPER_X86_64=1)"
-        echo "   Note: x86_64 binary requires QEMU emulation on Apple Silicon and may crash"
-        echo "   Unset this variable to use native arm64 binary (recommended)"
-        echo ""
-    else
-        echo "ℹ️  On Apple Silicon: Using native arm64 binary (recommended)"
-        echo "   Set USE_WRAPPER_X86_64=1 to try x86_64 binary instead (may crash with QEMU)"
-        echo ""
-    fi
+    echo "ℹ️  Apple Silicon detected: Using native arm64 binary"
+    echo ""
+    echo "   IMPORTANT: Credentials are REQUIRED on Apple Silicon."
+    echo "   The wrapper exits immediately without login credentials."
+    echo ""
+    echo "   After setup, configure credentials in .env before starting the wrapper."
+    echo "   First-time login requires 2FA - see README for instructions."
+    echo ""
 fi
 
 # Check Docker
@@ -90,36 +88,27 @@ echo "Setting up wrapper (decryption server) with Docker..."
 echo ""
 
 # Clone or update wrapper repository
-# Use arm64 branch on Apple Silicon (has complete Dockerfile with entrypoint.sh)
-# Use main branch on x86_64
-SYSTEM_ARCH=$(uname -m)
-if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
-    WRAPPER_BRANCH="arm64"
-else
-    WRAPPER_BRANCH="main"
-fi
-
+# Always use main branch - it has a simple Dockerfile that uses prebuilt binaries
+# The arm64 branch's Dockerfile tries to build from source (broken for public use)
 if [ -d "$WRAPPER_REPO_DIR" ]; then
-    echo "Updating wrapper repository (branch: $WRAPPER_BRANCH)..."
+    echo "Updating wrapper repository..."
     cd "$WRAPPER_REPO_DIR"
-    git fetch origin || true
-    git checkout "$WRAPPER_BRANCH" 2>/dev/null || git checkout -b "$WRAPPER_BRANCH" "origin/$WRAPPER_BRANCH" 2>/dev/null || true
     git pull || {
         echo "⚠️  Failed to update repository. Continuing with existing code..."
     }
 else
-    echo "Cloning wrapper repository (branch: $WRAPPER_BRANCH)..."
+    echo "Cloning wrapper repository..."
     if ! command -v git &> /dev/null; then
         echo "error: git not found. Cannot clone wrapper repository."
-        echo "   Please install git or clone manually: git clone -b $WRAPPER_BRANCH $WRAPPER_REPO_URL"
+        echo "   Please install git or clone manually: git clone $WRAPPER_REPO_URL"
         exit 1
     fi
     
-    git clone -b "$WRAPPER_BRANCH" "$WRAPPER_REPO_URL" "$WRAPPER_REPO_DIR" || {
+    git clone "$WRAPPER_REPO_URL" "$WRAPPER_REPO_DIR" || {
         echo "error: Failed to clone wrapper repository."
         exit 1
     }
-    echo "✓ Repository cloned (branch: $WRAPPER_BRANCH)"
+    echo "✓ Repository cloned"
 fi
 
 cd "$WRAPPER_REPO_DIR"
@@ -134,15 +123,9 @@ WRAPPER_IMAGE="${WRAPPER_IMAGE_BASE}-${WRAPPER_IMAGE_SUFFIX}"
 # Show clear architecture information
 SYSTEM_ARCH=$(uname -m)
 if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
-    if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
-        echo "System architecture: $SYSTEM_ARCH (Apple Silicon)"
-        echo "Using wrapper: arm64 (native, recommended)"
-        echo "Wrapper image: $WRAPPER_IMAGE"
-    else
-        echo "System architecture: $SYSTEM_ARCH (Apple Silicon)"
-        echo "Using wrapper: x86_64 (QEMU emulation - may crash)"
-        echo "Wrapper image: $WRAPPER_IMAGE"
-    fi
+    echo "System architecture: $SYSTEM_ARCH (Apple Silicon)"
+    echo "Using wrapper: arm64 (native)"
+    echo "Wrapper image: $WRAPPER_IMAGE"
 else
     echo "System architecture: $SYSTEM_ARCH"
     echo "Using wrapper: $WRAPPER_ARCH"
@@ -238,6 +221,13 @@ if curl -L -o "$ZIP_PATH" "$BINARY_URL"; then
             fi
             chmod +x "$BINARY_PATH"
             echo "✓ Binary extracted and ready"
+            
+            # Restore only the Dockerfile from main branch
+            # Release zips include their branch's Dockerfile (complex build-from-source)
+            # but we need the main branch's simple Dockerfile that uses prebuilt binaries
+            # NOTE: We keep the rootfs/ from the release because the arm64 binary needs
+            # arm64 shared libraries (.so files) - using x86_64 libs causes "corrupted shared library" errors
+            git checkout -- Dockerfile 2>/dev/null || true
         else
             echo "error: Could not find binary in extracted zip"
             exit 1
@@ -264,8 +254,6 @@ docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${WRAPPER_IMAGE_BASE}
 done
 
 # Build Docker image using the repo's Dockerfile
-# The correct branch (arm64 or main) is cloned based on system architecture
-# The Dockerfile handles platform configuration internally
 echo "Building wrapper Docker image..."
 cd "$WRAPPER_REPO_DIR"
 if docker build -t "$WRAPPER_IMAGE" .; then
@@ -308,8 +296,20 @@ fi
 echo ""
 echo "Setup complete!"
 echo ""
-echo "Next steps:"
-echo "1. Start wrapper: ./wrapper.sh start"
-echo "   Or use --auto-wrapper flag: ./download_apple_music.sh --auto-wrapper <url>"
-echo "2. Download music: ./download_apple_music.sh <apple-music-url>"
-echo "3. See README.md for detailed usage instructions"
+
+SYSTEM_ARCH=$(uname -m)
+if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+    echo "Next steps (Apple Silicon):"
+    echo "1. Configure credentials: cp .env.template .env && edit .env"
+    echo "   (REQUIRED - wrapper exits without credentials on Apple Silicon)"
+    echo "2. Start wrapper: ./wrapper.sh start"
+    echo "   (First time will require 2FA - see README for instructions)"
+    echo "3. Download music: ./download_apple_music.sh <apple-music-url>"
+else
+    echo "Next steps:"
+    echo "1. (Optional) Configure credentials: cp .env.template .env"
+    echo "2. Start wrapper: ./wrapper.sh start"
+    echo "3. Download music: ./download_apple_music.sh <apple-music-url>"
+fi
+echo ""
+echo "See README.md for detailed usage instructions"
