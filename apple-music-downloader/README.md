@@ -280,16 +280,7 @@ The arm64 wrapper can **crash during decryption** while the downloader is runnin
 - `decryptFragment: read tcp ... 127.0.0.1:10020: read: connection reset by peer`
 - `dial tcp 127.0.0.1:10020: connect: connection refused` (wrapper down, restarting)
 
-This is a known limitation of the prebuilt arm64 wrapper binary ([wrapper issue #8](https://github.com/WorldObservationLog/wrapper/issues/8)). The wrapper exits (often exit code 137 / SIGKILL, sometimes OOM), Docker restarts it with the cached session, but the current download fails.
-
-**Check if it’s OOM:** After a crash, inspect the container exit code. Exit **137** (128 + SIGKILL) often means the process was OOM‑killed:
-
-```bash
-docker inspect apple-music-wrapper --format '{{.State.ExitCode}}'
-# 137 = likely OOM; 0 = clean exit
-docker ps -a --filter name=apple-music-wrapper --format '{{.Names}} {{.Status}}'
-# e.g. "Exited (137) 2 minutes ago"
-```
+This is a known limitation of the prebuilt arm64 wrapper binary ([wrapper issue #8](https://github.com/WorldObservationLog/wrapper/issues/8)). The wrapper exits during decryption, Docker restarts it with the cached session, but the current download fails.
 
 **Workarounds:**
 
