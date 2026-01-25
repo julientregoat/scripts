@@ -7,7 +7,8 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
-WRAPPER_IMAGE="apple-music-wrapper"
+# WRAPPER_IMAGE will be set based on architecture (includes platform suffix)
+WRAPPER_IMAGE_BASE="apple-music-wrapper"
 WRAPPER_REPO_URL="https://github.com/WorldObservationLog/wrapper"
 WRAPPER_RELEASES_URL="https://api.github.com/repos/WorldObservationLog/wrapper/releases/latest"
 WRAPPER_REPO_DIR="$SCRIPT_DIR/wrapper-repo"
@@ -99,34 +100,69 @@ fi
 cd "$WRAPPER_REPO_DIR"
 
 # Detect architecture and download latest binary
-ARCH=$(uname -m)
-if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
-    WRAPPER_ARCH="arm64"
-    BINARY_PATTERN="Wrapper.arm64"
-elif [[ "$ARCH" == "x86_64" ]]; then
-    WRAPPER_ARCH="x86_64"
-    BINARY_PATTERN="Wrapper.x86_64"
-else
-    echo "error: Unsupported architecture: $ARCH"
-    echo "   Supported: x86_64, arm64"
-    exit 1
-fi
+# Source shared architecture detection script
+source "$SCRIPT_DIR/detect_wrapper_architecture.sh"
+
+# Set image name with platform suffix for clarity
+WRAPPER_IMAGE="${WRAPPER_IMAGE_BASE}-${WRAPPER_IMAGE_SUFFIX}"
 
 echo "Detected architecture: $WRAPPER_ARCH"
-echo "Downloading latest prebuilt binary..."
+echo "Wrapper image name: $WRAPPER_IMAGE"
 
 # Get latest release download URL
-if ! command -v curl &> /dev/null && ! command -v jq &> /dev/null; then
-    echo "error: curl or jq required to download binary."
+if ! command -v curl &> /dev/null; then
+    echo "error: curl required to download binary."
     echo "   Install curl: brew install curl (macOS) or sudo apt-get install curl (Linux)"
     exit 1
 fi
 
 # Fetch release info and find binary URL
-BINARY_URL=$(curl -s "$WRAPPER_RELEASES_URL" | \
-    grep -o "\"browser_download_url\": \"[^\"]*${BINARY_PATTERN}[^\"]*\"" | \
-    head -1 | \
-    cut -d '"' -f 4) || true
+# For arm64, check the arm64.latest release tag first (arm64 binaries are in separate releases)
+BINARY_URL=""
+
+if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+    # Check for arm64.latest release tag (arm64 binaries are in separate releases)
+    ARM64_RELEASE_INFO=$(curl -s "https://api.github.com/repos/WorldObservationLog/wrapper/releases/tags/Wrapper.arm64.latest" 2>/dev/null || echo "")
+    if [ -n "$ARM64_RELEASE_INFO" ]; then
+        BINARY_URL=$(echo "$ARM64_RELEASE_INFO" | \
+            grep -o "\"browser_download_url\": \"[^\"]*${BINARY_PATTERN}[^\"]*\.zip[^\"]*\"" | \
+            head -1 | \
+            cut -d '"' -f 4) || true
+    fi
+fi
+
+# If arm64-specific check didn't work, or we're on x86_64, check main releases
+if [ -z "$BINARY_URL" ]; then
+    RELEASE_INFO=$(curl -s "$WRAPPER_RELEASES_URL")
+    # Try to find zip file for preferred architecture
+    BINARY_URL=$(echo "$RELEASE_INFO" | \
+        grep -o "\"browser_download_url\": \"[^\"]*${BINARY_PATTERN}[^\"]*\.zip[^\"]*\"" | \
+        head -1 | \
+        cut -d '"' -f 4) || true
+fi
+
+# If not found and we have a fallback, try fallback architecture
+if [ -z "$BINARY_URL" ] && [ -n "$FALLBACK_PATTERN" ]; then
+    echo "⚠️  $WRAPPER_ARCH binary not available, falling back to $FALLBACK_ARCH (Docker will use Rosetta 2)"
+    RELEASE_INFO=$(curl -s "$WRAPPER_RELEASES_URL")
+    BINARY_URL=$(echo "$RELEASE_INFO" | \
+        grep -o "\"browser_download_url\": \"[^\"]*${FALLBACK_PATTERN}[^\"]*\.zip[^\"]*\"" | \
+        head -1 | \
+        cut -d '"' -f 4) || true
+    if [ -n "$BINARY_URL" ]; then
+        WRAPPER_ARCH="$FALLBACK_ARCH"
+        BINARY_PATTERN="$FALLBACK_PATTERN"
+    fi
+fi
+
+# If still not found, try without .zip extension (direct binary)
+if [ -z "$BINARY_URL" ]; then
+    BINARY_URL=$(echo "$RELEASE_INFO" | \
+        grep -o "\"browser_download_url\": \"[^\"]*${BINARY_PATTERN}[^\"]*\"" | \
+        grep -v "\.zip" | \
+        head -1 | \
+        cut -d '"' -f 4) || true
+fi
 
 if [ -z "$BINARY_URL" ]; then
     echo "error: Could not find download URL for $WRAPPER_ARCH binary"
@@ -134,27 +170,109 @@ if [ -z "$BINARY_URL" ]; then
     exit 1
 fi
 
-# Clean up any old binary files with different names (e.g., Wrapper.x86_64.*, Wrapper.arm64.*)
-echo "Cleaning up old binary files..."
-find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper.*" \) ! -name "wrapper" -exec rm -f {} \; 2>/dev/null || true
+# Clean up any old binary files and zip files
+echo "Cleaning up old files..."
+find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper.*" -o -name "*.zip" \) ! -name "wrapper" -exec rm -f {} \; 2>/dev/null || true
 
-# Download latest binary (always downloads to ensure we have latest)
-# Docker's build cache will automatically detect if the file changed and only rebuild if necessary
+# Download binary/zip
+echo "Downloading latest binary for $WRAPPER_ARCH..."
+ZIP_PATH="$WRAPPER_REPO_DIR/wrapper.zip"
 BINARY_PATH="$WRAPPER_REPO_DIR/wrapper"
-echo "Downloading latest binary..."
-if curl -L -o "$BINARY_PATH" "$BINARY_URL"; then
-    chmod +x "$BINARY_PATH"
-    echo "✓ Binary downloaded"
+
+if curl -L -o "$ZIP_PATH" "$BINARY_URL"; then
+    # Check if it's a zip file
+    if file "$ZIP_PATH" | grep -q "Zip archive"; then
+        echo "Extracting binary from zip..."
+        cd "$WRAPPER_REPO_DIR"
+        unzip -q -o "$ZIP_PATH" 2>/dev/null || {
+            echo "error: Failed to extract zip file"
+            exit 1
+        }
+        rm -f "$ZIP_PATH"
+        
+        # Find the extracted binary (try both uppercase Wrapper.* and lowercase wrapper)
+        EXTRACTED_BINARY=$(find "$WRAPPER_REPO_DIR" -maxdepth 1 -type f \( -name "Wrapper.*" -o -name "wrapper" \) ! -name "*.zip" | head -1)
+        if [ -n "$EXTRACTED_BINARY" ] && [ -f "$EXTRACTED_BINARY" ]; then
+            if [ "$EXTRACTED_BINARY" != "$BINARY_PATH" ]; then
+                mv "$EXTRACTED_BINARY" "$BINARY_PATH"
+            fi
+            chmod +x "$BINARY_PATH"
+            echo "✓ Binary extracted and ready"
+        else
+            echo "error: Could not find binary in extracted zip"
+            exit 1
+        fi
+    else
+        # Not a zip, treat as direct binary
+        mv "$ZIP_PATH" "$BINARY_PATH"
+        chmod +x "$BINARY_PATH"
+        echo "✓ Binary downloaded"
+    fi
 else
     echo "error: Failed to download binary"
     exit 1
 fi
 
-# Build Docker image
+# Create a simple Dockerfile for prebuilt binaries (the repo Dockerfile builds from source)
+# We use a separate Dockerfile since we're using prebuilt binaries, not building from source
+DOCKERFILE_PATH="$WRAPPER_REPO_DIR/Dockerfile.simple"
+cat > "$DOCKERFILE_PATH" << 'EOF'
+FROM debian:stable-slim
+
+ENV args=""
+
+COPY ./rootfs /app/rootfs
+COPY ./wrapper /app
+WORKDIR /app
+
+CMD ["bash", "-c", "/app/wrapper $args"]
+
+EXPOSE 10020 20020 30020
+EOF
+
+# Patch Dockerfile for x86_64 binary compatibility (needed when using x86_64 binary via qemu/Rosetta 2)
+# Note: arm64 binaries don't need this patching as they run natively
+if [[ "$WRAPPER_ARCH" == "x86_64" ]]; then
+    echo "Patching Dockerfile for x86_64 compatibility (needed for qemu/Rosetta 2)..."
+    # Insert tzdata installation after the FROM line
+    sed -i.tmp '/^FROM debian:stable-slim$/a\
+\
+# Install required libraries and timezone data for the wrapper binary (needed for x86_64 on Apple Silicon)\
+RUN apt-get update && \\\
+    apt-get install -y --no-install-recommends \\\
+    ca-certificates \\\
+    libc6 \\\
+    tzdata \\\
+    && rm -rf /var/lib/apt/lists/*
+' "$DOCKERFILE_PATH"
+    rm -f "$DOCKERFILE_PATH.tmp"
+    # Add environment variables to suppress Android NDK warnings
+    sed -i.tmp '/^ENV args=""/a\
+# Suppress Android NDK warnings (binary was built with Android NDK)\
+ENV ANDROID_DATA=""\
+ENV ANDROID_ROOT=""\
+ENV TZ=UTC
+' "$DOCKERFILE_PATH"
+    rm -f "$DOCKERFILE_PATH.tmp"
+fi
+
+# Clean up old wrapper images (any platform) before building new one
+# Remove images that match the base name but not the current platform-specific name
+echo "Cleaning up old wrapper images..."
+docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${WRAPPER_IMAGE_BASE}" | grep -v "^${WRAPPER_IMAGE}:latest$" | while read old_image; do
+    if [ -n "$old_image" ]; then
+        echo "  Removing old image: $old_image"
+        docker rmi "$old_image" 2>/dev/null || true
+    fi
+done
+
+# Build Docker image using the simple Dockerfile (for prebuilt binaries)
 # Docker's build cache will automatically detect if the binary file changed
 # and only rebuild if necessary (based on file checksums)
-echo "Building wrapper Docker image..."
-if docker build -t "$WRAPPER_IMAGE" .; then
+# Build for the platform matching the binary architecture
+echo "Building wrapper Docker image ($DOCKER_PLATFORM platform)..."
+cd "$WRAPPER_REPO_DIR"
+if docker build -f Dockerfile.simple --platform "$DOCKER_PLATFORM" -t "$WRAPPER_IMAGE" .; then
     echo "✓ Wrapper Docker image ready: $WRAPPER_IMAGE:latest"
 else
     echo "error: Failed to build wrapper Docker image"
@@ -162,19 +280,31 @@ else
 fi
 
 # Pull downloader image
+# Note: The downloader image only has x86_64 builds, so on arm64 we need to use --platform
 echo "Pulling downloader image..."
-if docker pull "$DOWNLOADER_IMAGE" 2>/dev/null; then
-    echo "✓ Downloader image ready: $DOWNLOADER_IMAGE"
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
+    # On Apple Silicon, pull with platform flag (image will use Rosetta 2)
+    if docker pull --platform linux/amd64 "$DOWNLOADER_IMAGE" 2>/dev/null; then
+        echo "✓ Downloader image ready: $DOWNLOADER_IMAGE (x86_64, will use Rosetta 2)"
+    else
+        echo "⚠️  Could not pull downloader image: $DOWNLOADER_IMAGE"
+        echo ""
+        echo "The downloader image will be pulled automatically when you run the download script."
+        echo "This is not a critical error - setup can continue."
+        echo ""
+    fi
 else
-    echo "error: Could not pull downloader image: $DOWNLOADER_IMAGE"
-    echo ""
-    echo "The downloader Docker image may not be available or there may be a network issue."
-    echo ""
-    echo "Repository: https://github.com/zhaarey/apple-music-downloader"
-    echo "Check available images and build instructions:"
-    echo "  https://github.com/zhaarey/apple-music-downloader#readme"
-    echo ""
-    exit 1
+    # On x86_64, try normal pull
+    if docker pull "$DOWNLOADER_IMAGE" 2>/dev/null; then
+        echo "✓ Downloader image ready: $DOWNLOADER_IMAGE"
+    else
+        echo "⚠️  Could not pull downloader image: $DOWNLOADER_IMAGE"
+        echo ""
+        echo "The downloader image will be pulled automatically when you run the download script."
+        echo "This is not a critical error - setup can continue."
+        echo ""
+    fi
 fi
 
 echo ""

@@ -55,6 +55,10 @@ This setup uses two components:
 
 ## Scripts
 
+### `detect_wrapper_architecture.sh` - Architecture detection (internal)
+
+Shared script used by `setup.sh` and `wrapper.sh` to detect system architecture and set platform-specific variables. Not typically run directly by users.
+
 ### `wrapper.sh` - Manage the decryption server
 
 ```bash
@@ -76,18 +80,31 @@ The wrapper runs as a **Docker container** (long-lived service) that should run 
 ### `download_apple_music.sh` - Download tracks/albums/playlists
 
 ```bash
-./download_apple_music.sh [options] <apple-music-url>
+./download_apple_music.sh [options] <apple-music-url> [url2] [url3] ...
 ```
 
 **Options:**
 - `--auto-wrapper` - Automatically start wrapper if not running, and stop it if this script started it (after download completes)
+- `--output-dir DIR` - Output directory for downloads (default: `~/Downloads`)
+- `--max-sample-rate RATE` - Maximum sample rate in Hz (default: auto-detect based on bit depth)
+  - Auto-detection: Default max 44.1 kHz for 16-bit, 48 kHz for 24-bit
+  - Override values: `44100`, `48000`, `96000`, `192000`
 - `--help` - Show detailed help
 
 **Examples:**
-- Album (wrapper must be running): `./download_apple_music.sh https://music.apple.com/us/album/...`
-- Track with auto-wrapper: `./download_apple_music.sh --auto-wrapper https://music.apple.com/us/song/...`
+- Single album (wrapper must be running): `./download_apple_music.sh https://music.apple.com/us/album/...`
+- Single track with auto-wrapper: `./download_apple_music.sh --auto-wrapper https://music.apple.com/us/song/...`
+- Custom output directory: `./download_apple_music.sh --output-dir ~/Music https://music.apple.com/us/album/...`
+- Limit sample rate: `./download_apple_music.sh --max-sample-rate 44100 https://music.apple.com/us/album/...`
+- Multiple URLs (more efficient - single docker run): `./download_apple_music.sh https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456`
 
-**Output:** Downloads to `~/Downloads` by default (configurable via `.env`)
+**Output:** Downloads to `~/Downloads/Apple Music Downloads` by default (use `--output-dir` to customize)
+- Files are organized as: `[Artist] - [Release Name]/[tracks]`
+- The script automatically reorganizes from the downloader's default structure (`ALAC/[Artist]/[Release Name]`) to the flattened structure
+
+**Performance:** When downloading multiple URLs, the script checks all URLs in a single docker run, then downloads all URLs in another single docker run. This is much more efficient than running the script multiple times.
+
+**Note on long downloads:** The download process blocks until completion. For very large albums/playlists, this may take several minutes. If the script is interrupted (e.g., by tool timeouts), files will be in `OUTPUT_DIR/ALAC/`. The script will automatically reorganize any existing ALAC files on the next run, or you can re-run the script to complete the reorganization.
 
 **Wrapper management:**
 - By default, the script requires the wrapper to be running (error if not running)
@@ -102,22 +119,38 @@ Automatically installs and updates dependencies:
 - Installs MP4Box (via Homebrew on macOS, apt/yum/pacman on Linux)
 - Clones/updates wrapper repository
 - Downloads latest prebuilt binary from releases (detects architecture automatically)
-- Builds/rebuilds wrapper Docker image (rebuilds if binary is newer)
-- Pulls the downloader Docker image
+  - Handles zip file downloads and extraction automatically
+  - On Apple Silicon (arm64), uses native arm64 binary (from `Wrapper.arm64.latest` release)
+  - On x86_64, uses x86_64 binary (from `Wrapper.x86_64.*` releases)
+- Builds/rebuilds wrapper Docker image with platform-specific naming (e.g., `apple-music-wrapper-arm64`, `apple-music-wrapper-x86_64`)
+  - Automatically cleans up old wrapper images before building
+  - Rebuilds if binary is newer
+- Attempts to pull the downloader Docker image
 
 **Note:** The wrapper Docker image is built automatically from the latest prebuilt binary. The setup script ensures you have the latest code and binary before building.
 
 **Note:** The wrapper runs in a Docker container (not a local binary), as recommended by the wrapper documentation.
+
+**Note:** On Apple Silicon (arm64), the wrapper uses native arm64 binaries and Docker images (no emulation needed). The downloader still uses `--platform linux/amd64` to run x86_64 images via Rosetta 2, as the downloader image doesn't have native arm64 builds yet.
 
 Run this once to set up everything needed.
 
 ### `check_format.sh` - Check available formats
 
 ```bash
-./check_format.sh <apple-music-url>
+./check_format.sh <apple-music-url> [url2] [url3] ...
 ```
 
-Shows what audio formats are available for a track without downloading. Look for `alac` or `audio-alac-stereo` in the output to confirm lossless format is available.
+Shows what audio formats are available for URLs without downloading. Validates that ALAC formats meet minimum quality requirements:
+- **Minimum bit depth:** 16-bit
+- **Minimum sample rate:** 44.1 kHz (44100 Hz) for all formats
+
+The script displays:
+- Bit depth and sample rate for each format found
+- Maximum sample rate available
+- Validation errors if any formats don't meet minimum requirements
+
+This script is also used internally by `download_apple_music.sh` for format validation.
 
 ## Configuration
 
@@ -141,7 +174,6 @@ cp .env.template .env
 - `APPLE_MUSIC_USERNAME` / `APPLE_MUSIC_PASSWORD` - Login credentials for wrapper. **Not required** - wrapper can decrypt without them. Only needed for certain authentication scenarios. Basic ALAC downloads work without credentials.
 - `APPLE_MUSIC_WRAPPER_HOST` - Wrapper host (default: 127.0.0.1)
 - `APPLE_MUSIC_WRAPPER_PORT` - Wrapper port (default: 10020)
-- `APPLE_MUSIC_OUTPUT_DIR` - Download directory (default: ~/Downloads)
 - `APPLE_MUSIC_AUTO_WRAPPER` - Auto-wrapper behavior (equivalent to `--auto-wrapper` flag, default: false)
 - `APPLE_MUSIC_MEDIA_USER_TOKEN` - **Not required for basic ALAC downloads**, but required for:
   - Lyrics (LRC, word-by-word, translations)
@@ -156,7 +188,18 @@ The `.env` file is gitignored for security.
 
 **ALAC (lossless) is the default and highest quality format.** The downloader automatically selects ALAC if available, falling back to other formats only if ALAC is not available for a specific track.
 
-No explicit format flags needed - ALAC is the default behavior.
+**Sample Rate Auto-Detection and Validation:**
+- The script automatically detects bit depth and sample rate from available formats
+- **Minimum requirements (applies to all formats):**
+  - Minimum bit depth: 16-bit
+  - Minimum sample rate: 44.1 kHz (44100 Hz)
+- **Default maximum sample rates:**
+  - **16-bit audio:** Maximum set to 44.1 kHz (CD quality)
+  - **24-bit audio:** Maximum set to 48 kHz (high-res)
+- Override maximum with `--max-sample-rate` flag if needed (supports 44100, 48000, 96000, 192000 Hz)
+- The script validates that all formats meet minimum quality requirements before downloading
+
+**Note:** Bit depth is determined by what Apple Music provides - it's not configurable. The script sets default maximum sample rates based on detected bit depth to ensure compatibility and reasonable file sizes, while enforcing minimum quality standards (16-bit minimum, 44.1 kHz minimum).
 
 ### Checking Available Formats
 
@@ -211,10 +254,14 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 
 **Note:** All dependencies except Docker are automatically installed/updated by `./setup.sh`. You only need to install Docker manually.
 
+**Platform Compatibility:**
+- **Apple Silicon (arm64):** Fully tested and working. Uses native arm64 wrapper binaries and Docker images (no emulation). The downloader uses `--platform linux/amd64` to run x86_64 images via Rosetta 2.
+- **x86_64 (Intel Mac/Linux):** Should work but needs testing. Uses native x86_64 wrapper binaries and Docker images. The downloader uses `--platform linux/amd64` flag.
+
 ## Troubleshooting
 
 ### Wrapper not starting
-- Ensure Docker image is built: `docker images | grep apple-music-wrapper`
+- Ensure Docker image is built: `docker images | grep apple-music-wrapper` (should show platform-specific image like `apple-music-wrapper-arm64` or `apple-music-wrapper-x86_64`)
 - Check logs: `docker logs apple-music-wrapper`
 - Verify Docker is running: `docker ps`
 - Rebuild image if needed: `./setup.sh`
@@ -231,18 +278,26 @@ which MP4Box || which mp4box
 brew reinstall gpac  # macOS
 ```
 
+### Apple Silicon (arm64) / Architecture Issues
+- **Wrapper binary:** Uses native arm64 binaries from the `Wrapper.arm64.latest` release. No emulation needed - runs natively on Apple Silicon.
+- **Wrapper Docker image:** Built with `--platform linux/arm64` and named `apple-music-wrapper-arm64` for clarity.
+- **Downloader image:** The downloader image doesn't have native arm64 builds yet. The scripts automatically use `--platform linux/amd64` to run x86_64 images via Rosetta 2. This works transparently.
+- **Performance:** The wrapper runs natively on Apple Silicon (no performance penalty). The downloader runs via Rosetta 2, which may be slightly slower than native but works correctly.
+- **Note:** The arm64 wrapper binary may be slightly older than the x86_64 version (check release dates), but core functionality is the same.
+
 ## Checking if Lossless is Available
 
 Before downloading, you can check what formats are available for a track:
 
 **Easy way (using helper script):**
 ```bash
-./check_format.sh <apple-music-url>
+./check_format.sh <apple-music-url> [url2] [url3] ...
 ```
 
 **Or directly with Docker:**
 ```bash
-docker run --rm --network host \
+# On Apple Silicon (arm64), add --platform linux/amd64
+docker run --rm --platform linux/amd64 --network host \
     ghcr.io/zhaarey/apple-music-downloader \
     --debug <apple-music-url>
 ```

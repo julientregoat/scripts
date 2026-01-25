@@ -5,7 +5,14 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WRAPPER_IMAGE="${APPLE_MUSIC_WRAPPER_IMAGE:-apple-music-wrapper}"
+
+# Detect architecture to determine image name
+# Source shared architecture detection script
+source "$SCRIPT_DIR/detect_wrapper_architecture.sh"
+
+# Set default image name based on detected architecture
+DEFAULT_WRAPPER_IMAGE="apple-music-wrapper-${WRAPPER_IMAGE_SUFFIX}"
+WRAPPER_IMAGE="${APPLE_MUSIC_WRAPPER_IMAGE:-$DEFAULT_WRAPPER_IMAGE}"
 WRAPPER_CONTAINER="${APPLE_MUSIC_WRAPPER_CONTAINER:-apple-music-wrapper}"
 WRAPPER_DATA_DIR="$SCRIPT_DIR/data"
 
@@ -58,9 +65,13 @@ start_wrapper() {
     fi
     echo ""
 
+    # Use the detected platform from architecture detection
+    local docker_platform="$DOCKER_PLATFORM"
+
     # Build Docker run command
     local docker_args=(
         -d
+        --platform "$docker_platform"
         --name "$WRAPPER_CONTAINER"
         --restart unless-stopped
         -v "$WRAPPER_DATA_DIR:/app/rootfs/data"
@@ -79,7 +90,7 @@ start_wrapper() {
     docker_args+=("$WRAPPER_IMAGE")
 
     # Start container
-    if docker run "${docker_args[@]}" > /dev/null 2>&1; then
+    if docker run "${docker_args[@]}" 2>&1; then
         # Wait a moment for container to start
         sleep 2
         if is_running; then
