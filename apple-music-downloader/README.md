@@ -320,6 +320,36 @@ For advanced features (Dolby Atmos, AAC, interactive selection, search, lyrics),
 - **apple-music-downloader:** [https://github.com/zhaarey/apple-music-downloader](https://github.com/zhaarey/apple-music-downloader) - Full documentation, all options, advanced features
 - **wrapper:** [https://github.com/WorldObservationLog/wrapper](https://github.com/WorldObservationLog/wrapper) - Docker setup (recommended), source build instructions, detailed options
 
+### Related Projects from Wrapper Maintainer
+The maintainer of the wrapper project (WorldObservationLog) has created additional projects that build on the wrapper ecosystem:
+
+- **AppleMusicDecrypt** ([https://github.com/WorldObservationLog/AppleMusicDecrypt](https://github.com/WorldObservationLog/AppleMusicDecrypt)) - A Python-based all-in-one downloader that combines downloading and decryption in a single application. Key features:
+  - Alternative to `zhaarey/apple-music-downloader` with built-in Python downloader
+  - **V2 supports remote decryption** via `wrapper-manager` instances (can work without local wrapper or even Apple Music subscription)
+  - Can use public wrapper-manager instances (e.g., `wm.wol.moe`) for decryption
+  - Simpler setup: single Python application with poetry
+  - Supports same codecs (ALAC, EC3, AC3, AAC variants) and link types (songs, albums, artists, playlists)
+  - **Apple Silicon compatible** (Python runs natively)
+
+- **wrapper-manager** ([https://github.com/WorldObservationLog/wrapper-manager](https://github.com/WorldObservationLog/wrapper-manager)) - A Go-based tool for managing multiple wrapper instances simultaneously. Key features:
+  - Multi-instance management (orchestrates multiple wrappers behind one endpoint)
+  - Multi-connection decryption (parallel decryption, up to 40MB/s per instance)
+  - Add accounts at runtime (including 2FA support)
+  - gRPC API for programmatic control
+  - Get lyrics without an account
+  - Automatic region detection
+  - **Platform support:** Linux x86_64 and arm64 (can run in Docker on macOS)
+
+**Relationship to current setup:**
+- Your current setup uses `zhaarey/apple-music-downloader` + local `wrapper` (single instance)
+- `AppleMusicDecrypt` is an alternative downloader that can use remote `wrapper-manager` instances
+- `wrapper-manager` is useful if you want to run a local decryption service with multiple accounts or need faster parallel decryption
+- These projects don't solve wrapper issues directly (they depend on wrapper/wrapper-manager), but `AppleMusicDecrypt` with remote decryption could bypass local wrapper problems entirely
+
+**When to explore:**
+- **AppleMusicDecrypt:** If you want to test remote decryption (bypassing local wrapper), need a simpler single-app solution, or want an alternative client
+- **wrapper-manager:** If you want to run a local decryption service for multiple accounts, need faster parallel decryption, or are setting up infrastructure for others
+
 ### Historical Reference
 The [rentry.org guide](https://rentry.org/firehawk52/#apple-music_1) contains historical information about various Apple Music download methods (some deprecated) and references to other music downloading utilities (Deezer, Qobuz, Tidal, Spotify, etc.). Useful for understanding tool evolution and finding alternatives.
 
