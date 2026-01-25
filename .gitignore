@@ -1,1 +1,8 @@
 .DS_Store
+
+# Apple Music Downloader
+apple-music-downloader/.env
+apple-music-downloader/.wrapper.pid
+apple-music-downloader/.wrapper.log
+apple-music-downloader/wrapper-repo/
+apple-music-downloader/data/
