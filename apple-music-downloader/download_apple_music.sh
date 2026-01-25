@@ -18,6 +18,9 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
+# Source shared wrapper utilities (architecture detection)
+source "$SCRIPT_DIR/wrapper_utils.sh"
+
 # Initialize variables for cleanup tracking
 WRAPPER_STARTED_BY_SCRIPT=false
 AUTO_WRAPPER=false
@@ -282,6 +285,15 @@ mkdir -p "$OUTPUT_DIR"
 reorganize_files 2>/dev/null || true
 
 echo "Downloading from Apple Music..."
+
+# Show architecture information
+ARCH=$(uname -m)
+if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
+    echo "System: $ARCH (Apple Silicon) | Downloader: x86_64 (no arm64 build available - using Rosetta 2)"
+else
+    echo "System: $ARCH | Downloader: x86_64"
+fi
+
 if [ ${#URLS[@]} -eq 1 ]; then
     echo "URL: ${URLS[0]}"
 else

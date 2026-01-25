@@ -18,6 +18,20 @@ echo "Apple Music Downloader Setup"
 echo "============================"
 echo ""
 
+# Note about architecture selection
+if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+    if [[ "${USE_WRAPPER_X86_64}" == "1" ]]; then
+        echo "⚠️  Using x86_64 binary (USE_WRAPPER_X86_64=1)"
+        echo "   Note: x86_64 binary requires QEMU emulation on Apple Silicon and may crash"
+        echo "   Unset this variable to use native arm64 binary (recommended)"
+        echo ""
+    else
+        echo "ℹ️  On Apple Silicon: Using native arm64 binary (recommended)"
+        echo "   Set USE_WRAPPER_X86_64=1 to try x86_64 binary instead (may crash with QEMU)"
+        echo ""
+    fi
+fi
+
 # Check Docker
 if ! command -v docker &> /dev/null; then
     echo "error: Docker must be installed."
@@ -76,38 +90,64 @@ echo "Setting up wrapper (decryption server) with Docker..."
 echo ""
 
 # Clone or update wrapper repository
+# Use arm64 branch on Apple Silicon (has complete Dockerfile with entrypoint.sh)
+# Use main branch on x86_64
+SYSTEM_ARCH=$(uname -m)
+if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+    WRAPPER_BRANCH="arm64"
+else
+    WRAPPER_BRANCH="main"
+fi
+
 if [ -d "$WRAPPER_REPO_DIR" ]; then
-    echo "Updating wrapper repository..."
+    echo "Updating wrapper repository (branch: $WRAPPER_BRANCH)..."
     cd "$WRAPPER_REPO_DIR"
+    git fetch origin || true
+    git checkout "$WRAPPER_BRANCH" 2>/dev/null || git checkout -b "$WRAPPER_BRANCH" "origin/$WRAPPER_BRANCH" 2>/dev/null || true
     git pull || {
         echo "⚠️  Failed to update repository. Continuing with existing code..."
     }
 else
-    echo "Cloning wrapper repository..."
+    echo "Cloning wrapper repository (branch: $WRAPPER_BRANCH)..."
     if ! command -v git &> /dev/null; then
         echo "error: git not found. Cannot clone wrapper repository."
-        echo "   Please install git or clone manually: git clone $WRAPPER_REPO_URL"
+        echo "   Please install git or clone manually: git clone -b $WRAPPER_BRANCH $WRAPPER_REPO_URL"
         exit 1
     fi
     
-    git clone "$WRAPPER_REPO_URL" "$WRAPPER_REPO_DIR" || {
+    git clone -b "$WRAPPER_BRANCH" "$WRAPPER_REPO_URL" "$WRAPPER_REPO_DIR" || {
         echo "error: Failed to clone wrapper repository."
         exit 1
     }
-    echo "✓ Repository cloned"
+    echo "✓ Repository cloned (branch: $WRAPPER_BRANCH)"
 fi
 
 cd "$WRAPPER_REPO_DIR"
 
 # Detect architecture and download latest binary
-# Source shared architecture detection script
-source "$SCRIPT_DIR/detect_wrapper_architecture.sh"
+# Source shared wrapper utilities (includes architecture detection and runtime utilities)
+source "$SCRIPT_DIR/wrapper_utils.sh"
 
 # Set image name with platform suffix for clarity
 WRAPPER_IMAGE="${WRAPPER_IMAGE_BASE}-${WRAPPER_IMAGE_SUFFIX}"
 
-echo "Detected architecture: $WRAPPER_ARCH"
-echo "Wrapper image name: $WRAPPER_IMAGE"
+# Show clear architecture information
+SYSTEM_ARCH=$(uname -m)
+if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+    if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+        echo "System architecture: $SYSTEM_ARCH (Apple Silicon)"
+        echo "Using wrapper: arm64 (native, recommended)"
+        echo "Wrapper image: $WRAPPER_IMAGE"
+    else
+        echo "System architecture: $SYSTEM_ARCH (Apple Silicon)"
+        echo "Using wrapper: x86_64 (QEMU emulation - may crash)"
+        echo "Wrapper image: $WRAPPER_IMAGE"
+    fi
+else
+    echo "System architecture: $SYSTEM_ARCH"
+    echo "Using wrapper: $WRAPPER_ARCH"
+    echo "Wrapper image: $WRAPPER_IMAGE"
+fi
 
 # Get latest release download URL
 if ! command -v curl &> /dev/null; then
@@ -213,49 +253,6 @@ else
     exit 1
 fi
 
-# Create a simple Dockerfile for prebuilt binaries (the repo Dockerfile builds from source)
-# We use a separate Dockerfile since we're using prebuilt binaries, not building from source
-DOCKERFILE_PATH="$WRAPPER_REPO_DIR/Dockerfile.simple"
-cat > "$DOCKERFILE_PATH" << 'EOF'
-FROM debian:stable-slim
-
-ENV args=""
-
-COPY ./rootfs /app/rootfs
-COPY ./wrapper /app
-WORKDIR /app
-
-CMD ["bash", "-c", "/app/wrapper $args"]
-
-EXPOSE 10020 20020 30020
-EOF
-
-# Patch Dockerfile for x86_64 binary compatibility (needed when using x86_64 binary via qemu/Rosetta 2)
-# Note: arm64 binaries don't need this patching as they run natively
-if [[ "$WRAPPER_ARCH" == "x86_64" ]]; then
-    echo "Patching Dockerfile for x86_64 compatibility (needed for qemu/Rosetta 2)..."
-    # Insert tzdata installation after the FROM line
-    sed -i.tmp '/^FROM debian:stable-slim$/a\
-\
-# Install required libraries and timezone data for the wrapper binary (needed for x86_64 on Apple Silicon)\
-RUN apt-get update && \\\
-    apt-get install -y --no-install-recommends \\\
-    ca-certificates \\\
-    libc6 \\\
-    tzdata \\\
-    && rm -rf /var/lib/apt/lists/*
-' "$DOCKERFILE_PATH"
-    rm -f "$DOCKERFILE_PATH.tmp"
-    # Add environment variables to suppress Android NDK warnings
-    sed -i.tmp '/^ENV args=""/a\
-# Suppress Android NDK warnings (binary was built with Android NDK)\
-ENV ANDROID_DATA=""\
-ENV ANDROID_ROOT=""\
-ENV TZ=UTC
-' "$DOCKERFILE_PATH"
-    rm -f "$DOCKERFILE_PATH.tmp"
-fi
-
 # Clean up old wrapper images (any platform) before building new one
 # Remove images that match the base name but not the current platform-specific name
 echo "Cleaning up old wrapper images..."
@@ -266,13 +263,12 @@ docker images --format '{{.Repository}}:{{.Tag}}' | grep "^${WRAPPER_IMAGE_BASE}
     fi
 done
 
-# Build Docker image using the simple Dockerfile (for prebuilt binaries)
-# Docker's build cache will automatically detect if the binary file changed
-# and only rebuild if necessary (based on file checksums)
-# Build for the platform matching the binary architecture
-echo "Building wrapper Docker image ($DOCKER_PLATFORM platform)..."
+# Build Docker image using the repo's Dockerfile
+# The correct branch (arm64 or main) is cloned based on system architecture
+# The Dockerfile handles platform configuration internally
+echo "Building wrapper Docker image..."
 cd "$WRAPPER_REPO_DIR"
-if docker build -f Dockerfile.simple --platform "$DOCKER_PLATFORM" -t "$WRAPPER_IMAGE" .; then
+if docker build -t "$WRAPPER_IMAGE" .; then
     echo "✓ Wrapper Docker image ready: $WRAPPER_IMAGE:latest"
 else
     echo "error: Failed to build wrapper Docker image"
@@ -285,8 +281,9 @@ echo "Pulling downloader image..."
 ARCH=$(uname -m)
 if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
     # On Apple Silicon, pull with platform flag (image will use Rosetta 2)
+    echo "System: $ARCH (Apple Silicon) | Downloader: x86_64 (no arm64 build available - using Rosetta 2)"
     if docker pull --platform linux/amd64 "$DOWNLOADER_IMAGE" 2>/dev/null; then
-        echo "✓ Downloader image ready: $DOWNLOADER_IMAGE (x86_64, will use Rosetta 2)"
+        echo "✓ Downloader image ready: $DOWNLOADER_IMAGE"
     else
         echo "⚠️  Could not pull downloader image: $DOWNLOADER_IMAGE"
         echo ""
@@ -296,6 +293,7 @@ if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
     fi
 else
     # On x86_64, try normal pull
+    echo "System: $ARCH | Downloader: x86_64"
     if docker pull "$DOWNLOADER_IMAGE" 2>/dev/null; then
         echo "✓ Downloader image ready: $DOWNLOADER_IMAGE"
     else

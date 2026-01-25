@@ -55,9 +55,12 @@ This setup uses two components:
 
 ## Scripts
 
-### `detect_wrapper_architecture.sh` - Architecture detection (internal)
+### `wrapper_utils.sh` - Shared wrapper utilities (internal)
 
-Shared script used by `setup.sh` and `wrapper.sh` to detect system architecture and set platform-specific variables. Not typically run directly by users.
+Shared script used by `setup.sh`, `wrapper.sh`, and other scripts. Provides:
+- Architecture detection for wrapper binary and image selection
+
+Not typically run directly by users.
 
 ### `wrapper.sh` - Manage the decryption server
 
@@ -120,8 +123,9 @@ Automatically installs and updates dependencies:
 - Clones/updates wrapper repository
 - Downloads latest prebuilt binary from releases (detects architecture automatically)
   - Handles zip file downloads and extraction automatically
-  - On Apple Silicon (arm64), uses native arm64 binary (from `Wrapper.arm64.latest` release)
-  - On x86_64, uses x86_64 binary (from `Wrapper.x86_64.*` releases)
+  - On Apple Silicon (arm64), uses native arm64 binary by default (recommended)
+  - On x86_64, uses x86_64 binary
+  - Set `USE_WRAPPER_X86_64=1` to force x86_64 on Apple Silicon (not recommended, may crash)
 - Builds/rebuilds wrapper Docker image with platform-specific naming (e.g., `apple-music-wrapper-arm64`, `apple-music-wrapper-x86_64`)
   - Automatically cleans up old wrapper images before building
   - Rebuilds if binary is newer
@@ -131,7 +135,7 @@ Automatically installs and updates dependencies:
 
 **Note:** The wrapper runs in a Docker container (not a local binary), as recommended by the wrapper documentation.
 
-**Note:** On Apple Silicon (arm64), the wrapper uses native arm64 binaries and Docker images (no emulation needed). The downloader still uses `--platform linux/amd64` to run x86_64 images via Rosetta 2, as the downloader image doesn't have native arm64 builds yet.
+**Note:** On Apple Silicon (arm64), the wrapper uses native arm64 binaries and Docker images by default (no emulation needed). The downloader still uses `--platform linux/amd64` to run x86_64 images via Rosetta 2, as the downloader image doesn't have native arm64 builds yet.
 
 Run this once to set up everything needed.
 
@@ -255,8 +259,8 @@ This will show you all available formats (ALAC, Dolby Atmos, AAC, etc.) without 
 **Note:** All dependencies except Docker are automatically installed/updated by `./setup.sh`. You only need to install Docker manually.
 
 **Platform Compatibility:**
-- **Apple Silicon (arm64):** Fully tested and working. Uses native arm64 wrapper binaries and Docker images (no emulation). The downloader uses `--platform linux/amd64` to run x86_64 images via Rosetta 2.
-- **x86_64 (Intel Mac/Linux):** Should work but needs testing. Uses native x86_64 wrapper binaries and Docker images. The downloader uses `--platform linux/amd64` flag.
+- **Apple Silicon (arm64):** Uses native arm64 wrapper binaries and Docker images by default (no emulation). The downloader uses `--platform linux/amd64` to run x86_64 images via Rosetta 2.
+- **x86_64 (Intel Mac/Linux):** Uses native x86_64 wrapper binaries and Docker images. The downloader uses `--platform linux/amd64` flag.
 
 ## Troubleshooting
 
@@ -279,11 +283,11 @@ brew reinstall gpac  # macOS
 ```
 
 ### Apple Silicon (arm64) / Architecture Issues
-- **Wrapper binary:** Uses native arm64 binaries from the `Wrapper.arm64.latest` release. No emulation needed - runs natively on Apple Silicon.
-- **Wrapper Docker image:** Built with `--platform linux/arm64` and named `apple-music-wrapper-arm64` for clarity.
+- **Wrapper binary:** On Apple Silicon, **defaults to native arm64 binary** (recommended). The wrapper binary is compiled with Android NDK and links against Android Apple Music app libraries - this is by design for decryption to work.
+- **Wrapper Docker image:** Built from the arm64 branch on Apple Silicon (or main branch on x86_64). The Dockerfile handles platform configuration internally. Named `apple-music-wrapper-arm64` or `apple-music-wrapper-x86_64` for clarity.
 - **Downloader image:** The downloader image doesn't have native arm64 builds yet. The scripts automatically use `--platform linux/amd64` to run x86_64 images via Rosetta 2. This works transparently.
-- **Performance:** The wrapper runs natively on Apple Silicon (no performance penalty). The downloader runs via Rosetta 2, which may be slightly slower than native but works correctly.
-- **Note:** The arm64 wrapper binary may be slightly older than the x86_64 version (check release dates), but core functionality is the same.
+- **x86_64 binary on Apple Silicon:** Not recommended. Running x86_64 Android NDK binaries on Apple Silicon requires QEMU emulation (not Rosetta 2), which often crashes with segmentation faults. Use native arm64 instead.
+- **Troubleshooting:** If the wrapper container is restarting or crashing, check logs with `docker logs apple-music-wrapper`. If using x86_64 binary on Apple Silicon and seeing QEMU segfaults, switch to arm64 (the default).
 
 ## Checking if Lossless is Available
 

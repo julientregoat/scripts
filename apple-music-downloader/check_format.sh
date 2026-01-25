@@ -14,19 +14,9 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
     set +a
 fi
 
-WRAPPER_HOST="${APPLE_MUSIC_WRAPPER_HOST:-127.0.0.1}"
-WRAPPER_PORT="${APPLE_MUSIC_WRAPPER_PORT:-10020}"
-
-# Check if wrapper is accessible
-check_wrapper() {
-    if command -v timeout &> /dev/null; then
-        timeout 1 bash -c "echo > /dev/tcp/$WRAPPER_HOST/$WRAPPER_PORT" 2>/dev/null
-    elif command -v nc &> /dev/null; then
-        nc -z "$WRAPPER_HOST" "$WRAPPER_PORT" 2>/dev/null
-    else
-        return 1
-    fi
-}
+# Note: Format checking with --debug doesn't require the wrapper (only queries metadata)
+# This script doesn't need wrapper_utils.sh - if sourced by download_apple_music.sh,
+# that script will source wrapper_utils.sh directly
 
 # Check ALAC availability and validate formats
 # Usage: check_alac_formats <url1> [url2] [url3] ...
@@ -206,12 +196,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
         exit 1
     fi
     
-    # Check if wrapper is accessible
-    if ! check_wrapper; then
-        echo "error: Wrapper server not reachable at $WRAPPER_HOST:$WRAPPER_PORT"
-        echo "Start it with: ./wrapper.sh start"
-        exit 1
-    fi
+    # Note: Format checking with --debug doesn't require the wrapper
+    # The wrapper is only needed for actual downloading/decryption
+    # So we skip wrapper checks here to make format checks faster
     
     URL=$1
     if [ -z "$URL" ]; then

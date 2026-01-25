@@ -6,9 +6,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Detect architecture to determine image name
-# Source shared architecture detection script
-source "$SCRIPT_DIR/detect_wrapper_architecture.sh"
+# Source shared wrapper utilities (includes architecture detection and runtime utilities)
+source "$SCRIPT_DIR/wrapper_utils.sh"
 
 # Set default image name based on detected architecture
 DEFAULT_WRAPPER_IMAGE="apple-music-wrapper-${WRAPPER_IMAGE_SUFFIX}"
@@ -56,6 +55,19 @@ start_wrapper() {
     mkdir -p "$WRAPPER_DATA_DIR"
 
     echo "Starting wrapper (Docker container)..."
+    
+    # Show architecture information
+    SYSTEM_ARCH=$(uname -m)
+    if [[ "$SYSTEM_ARCH" == "arm64" ]] || [[ "$SYSTEM_ARCH" == "aarch64" ]]; then
+        if [[ "$WRAPPER_ARCH" == "arm64" ]]; then
+            echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: arm64 (native)"
+        else
+            echo "System: $SYSTEM_ARCH (Apple Silicon) | Wrapper: x86_64 (QEMU)"
+        fi
+    else
+        echo "System: $SYSTEM_ARCH | Wrapper: $WRAPPER_ARCH"
+    fi
+    
     echo "Host: $WRAPPER_HOST"
     echo "Ports: $WRAPPER_PORT (decrypt), $WRAPPER_M3U8_PORT (m3u8), $WRAPPER_ACCOUNT_PORT (account)"
     if [ -n "$APPLE_MUSIC_USERNAME" ]; then
@@ -65,13 +77,10 @@ start_wrapper() {
     fi
     echo ""
 
-    # Use the detected platform from architecture detection
-    local docker_platform="$DOCKER_PLATFORM"
-
     # Build Docker run command
+    # The image was built for the correct architecture, no need to specify platform
     local docker_args=(
         -d
-        --platform "$docker_platform"
         --name "$WRAPPER_CONTAINER"
         --restart unless-stopped
         -v "$WRAPPER_DATA_DIR:/app/rootfs/data"
@@ -91,14 +100,18 @@ start_wrapper() {
 
     # Start container
     if docker run "${docker_args[@]}" 2>&1; then
-        # Wait a moment for container to start
+        # Wait for container to initialize
         sleep 2
+        
+        # Check if container is running
         if is_running; then
             echo "✓ Wrapper started (container: $WRAPPER_CONTAINER)"
             echo "View logs: docker logs $WRAPPER_CONTAINER"
         else
-            echo "⚠️  Container started but may have exited. Check logs:"
+            echo "⚠️  Container started but is not running. Check logs:"
             echo "   docker logs $WRAPPER_CONTAINER"
+            docker logs "$WRAPPER_CONTAINER" 2>&1 | tail -10
+            return 1
         fi
     else
         echo "error: Failed to start wrapper container"
