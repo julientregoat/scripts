@@ -28,10 +28,9 @@ Scripts for downloading lossless ALAC audio from Apple Music using a paid subscr
    
    First-time setup requires 2FA - see [Apple Silicon setup](#apple-silicon-arm64---important) for details.
 
-3. **Start wrapper (or use --auto-wrapper):**
+3. **Start wrapper:**
    ```bash
    ./wrapper.sh start
-   # Or use --auto-wrapper flag when downloading
    ```
 
 4. **Download:**
@@ -85,7 +84,6 @@ The wrapper runs as a **Docker container** (long-lived service) that should run 
 ```
 
 **Options:**
-- `--auto-wrapper` - Automatically start wrapper if not running, and stop it if this script started it (after download completes)
 - `--output-dir DIR` - Output directory for downloads (default: `~/Downloads`)
 - `--max-sample-rate RATE` - Maximum sample rate in Hz (default: auto-detect based on bit depth)
   - Auto-detection: Default max 44.1 kHz for 16-bit, 48 kHz for 24-bit
@@ -94,7 +92,6 @@ The wrapper runs as a **Docker container** (long-lived service) that should run 
 
 **Examples:**
 - Single album (wrapper must be running): `./download_apple_music.sh https://music.apple.com/us/album/...`
-- Single track with auto-wrapper: `./download_apple_music.sh --auto-wrapper https://music.apple.com/us/song/...`
 - Custom output directory: `./download_apple_music.sh --output-dir ~/Music https://music.apple.com/us/album/...`
 - Limit sample rate: `./download_apple_music.sh --max-sample-rate 44100 https://music.apple.com/us/album/...`
 - Multiple URLs (more efficient - single docker run): `./download_apple_music.sh https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456`
@@ -108,10 +105,9 @@ The wrapper runs as a **Docker container** (long-lived service) that should run 
 **Note on long downloads:** The download process blocks until completion. For very large albums/playlists, this may take several minutes. If the script is interrupted (e.g., by tool timeouts), files will be in `OUTPUT_DIR/ALAC/`. The script will automatically reorganize any existing ALAC files on the next run, or you can re-run the script to complete the reorganization.
 
 **Wrapper management:**
-- By default, the script requires the wrapper to be running (error if not running)
-- Start manually: `./wrapper.sh start` (recommended for multiple downloads)
-- Use `--auto-wrapper` for convenience: starts wrapper if needed, stops it if the script started it
-- For multiple downloads, start wrapper once and leave it running (don't use `--auto-wrapper`)
+- The script requires the wrapper to be running (error if not running)
+- Start manually: `./wrapper.sh start`
+- For multiple downloads, start wrapper once and leave it running
 
 ### `setup.sh` - Initial setup and dependency installation
 
@@ -175,7 +171,6 @@ cp .env.template .env
 - `APPLE_MUSIC_USERNAME` / `APPLE_MUSIC_PASSWORD` - Login credentials for wrapper. **Required on Apple Silicon** (wrapper exits without them). Optional on x86_64.
 - `APPLE_MUSIC_WRAPPER_HOST` - Wrapper host (default: 127.0.0.1)
 - `APPLE_MUSIC_WRAPPER_PORT` - Wrapper port (default: 10020)
-- `APPLE_MUSIC_AUTO_WRAPPER` - Auto-wrapper behavior (equivalent to `--auto-wrapper` flag, default: false)
 - `APPLE_MUSIC_MEDIA_USER_TOKEN` - **Not required for basic ALAC downloads**, but required for:
   - Lyrics (LRC, word-by-word, translations)
   - aac-lc format (lossy, lower quality - avoid if you want lossless)

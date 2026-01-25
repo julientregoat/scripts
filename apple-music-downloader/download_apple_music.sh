@@ -8,7 +8,6 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOWNLOADER_IMAGE="ghcr.io/zhaarey/apple-music-downloader"
 DOWNLOADER_CONTAINER="${APPLE_MUSIC_DOWNLOADER_CONTAINER:-apple-music-downloader}"
-WRAPPER_SCRIPT="$SCRIPT_DIR/wrapper.sh"
 CHECK_FORMAT_SCRIPT="$SCRIPT_DIR/check_format.sh"
 
 # Load .env if it exists
@@ -21,9 +20,7 @@ fi
 # Source shared wrapper utilities (architecture detection)
 source "$SCRIPT_DIR/wrapper_utils.sh"
 
-# Initialize variables for cleanup tracking
-WRAPPER_STARTED_BY_SCRIPT=false
-AUTO_WRAPPER=false
+# Initialize variables
 OUTPUT_DIR=""
 ALAC_MAX=""
 
@@ -96,13 +93,6 @@ cleanup() {
         reorganize_files 2>/dev/null || true
     fi
     
-    if [ "$AUTO_WRAPPER" = true ] && [ "$WRAPPER_STARTED_BY_SCRIPT" = true ]; then
-        echo ""
-        echo "Cleaning up: stopping wrapper..."
-        if [ -f "$WRAPPER_SCRIPT" ] && [ -x "$WRAPPER_SCRIPT" ]; then
-            "$WRAPPER_SCRIPT" stop 2>/dev/null || true
-        fi
-    fi
     exit $exit_code
 }
 
@@ -111,18 +101,9 @@ trap cleanup EXIT INT TERM
 WRAPPER_HOST="${APPLE_MUSIC_WRAPPER_HOST:-127.0.0.1}"
 WRAPPER_PORT="${APPLE_MUSIC_WRAPPER_PORT:-10020}"
 
-# Check for env var override
-if [ "${APPLE_MUSIC_AUTO_WRAPPER:-false}" = "true" ]; then
-    AUTO_WRAPPER=true
-fi
-
 # Parse flags
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --auto-wrapper)
-            AUTO_WRAPPER=true
-            shift
-            ;;
         --output-dir)
             if [ -z "$2" ]; then
                 echo "error: --output-dir requires a directory path"
@@ -148,8 +129,6 @@ Supports tracks, albums, playlists, and artists.
 Can download multiple URLs in a single run (more efficient).
 
 Options:
-  --auto-wrapper    Automatically start wrapper if not running, and stop it
-                    if this script started it (after download completes)
   --output-dir DIR  Output directory for downloads (default: ~/Downloads)
   --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect based on bit depth)
                             44100 for 16-bit, 48000 for 24-bit
@@ -158,7 +137,6 @@ Options:
 
 Examples:
   $0 https://music.apple.com/us/album/album-name/1234567890
-  $0 --auto-wrapper https://music.apple.com/us/song/song-name/1234567890
   $0 --output-dir ~/Music https://music.apple.com/us/album/album-name/1234567890
   $0 --max-sample-rate 44100 https://music.apple.com/us/album/album-name/1234567890
   $0 https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456
@@ -167,9 +145,8 @@ Environment variables:
   APPLE_MUSIC_WRAPPER_HOST  - Wrapper host (default: 127.0.0.1)
   APPLE_MUSIC_WRAPPER_PORT - Wrapper port (default: 10020)
 
-Note: The wrapper is a long-lived service. For multiple downloads, start it once
-with ./wrapper.sh start and leave it running. Use --auto-wrapper for convenience
-when doing a single download.
+Note: The wrapper is a long-lived service. Start it once with ./wrapper.sh start
+and leave it running for multiple downloads.
 EOF
             exit 0
             ;;
@@ -189,15 +166,12 @@ if [ ${#URLS[@]} -eq 0 ]; then
     echo "Can download multiple URLs in a single run (more efficient)."
     echo ""
     echo "Options:"
-    echo "  --auto-wrapper    Automatically start wrapper if not running, and stop it"
-    echo "                    if this script started it (after download completes)"
     echo "  --output-dir DIR  Output directory for downloads (default: ~/Downloads)"
     echo "  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect)"
     echo "  -h, --help        Show detailed help"
     echo ""
     echo "Examples:"
     echo "  $0 https://music.apple.com/us/album/album-name/1234567890"
-    echo "  $0 --auto-wrapper https://music.apple.com/us/song/song-name/1234567890"
     echo "  $0 --output-dir ~/Music https://music.apple.com/us/album/album-name/1234567890"
     echo "  $0 https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456"
     echo ""
@@ -229,39 +203,13 @@ check_wrapper() {
     fi
 }
 
-WRAPPER_RUNNING=false
-if check_wrapper; then
-    WRAPPER_RUNNING=true
-fi
-
-# Handle wrapper startup
-if [ "$WRAPPER_RUNNING" = false ]; then
-    if [ "$AUTO_WRAPPER" = true ]; then
-        echo "Wrapper not running. Starting wrapper..."
-        if [ -f "$WRAPPER_SCRIPT" ] && [ -x "$WRAPPER_SCRIPT" ]; then
-            "$WRAPPER_SCRIPT" start
-            WRAPPER_STARTED_BY_SCRIPT=true
-            # Wait a moment for wrapper to be ready
-            sleep 2
-            if check_wrapper; then
-                echo "✓ Wrapper started and ready"
-            else
-                echo "⚠️  Wrapper started but not yet accessible. Continuing anyway..."
-            fi
-        else
-            echo "error: wrapper.sh not found or not executable"
-            echo "Cannot auto-start wrapper. Please start manually: ./wrapper.sh start"
-            exit 1
-        fi
-        echo ""
-    else
-        echo "error: Wrapper server not reachable at $WRAPPER_HOST:$WRAPPER_PORT"
-        echo ""
-        echo "The wrapper (decryption server) must be running before downloading."
-        echo "Start it with: ./wrapper.sh start"
-        echo "Or use --auto-wrapper flag to start it automatically"
-        exit 1
-    fi
+# Check if wrapper is running
+if ! check_wrapper; then
+    echo "error: Wrapper server not reachable at $WRAPPER_HOST:$WRAPPER_PORT"
+    echo ""
+    echo "The wrapper (decryption server) must be running before downloading."
+    echo "Start it with: ./wrapper.sh start"
+    exit 1
 fi
 
 # Source check_format.sh to use its format checking function
@@ -376,12 +324,3 @@ echo "✓ Download complete!"
 reorganize_files
 
 echo "Files saved to: $OUTPUT_DIR/Apple Music Downloads"
-
-# Handle wrapper shutdown if we started it
-if [ "$AUTO_WRAPPER" = true ] && [ "$WRAPPER_STARTED_BY_SCRIPT" = true ]; then
-    echo ""
-    echo "Stopping wrapper (started by this script)..."
-    if [ -f "$WRAPPER_SCRIPT" ] && [ -x "$WRAPPER_SCRIPT" ]; then
-        "$WRAPPER_SCRIPT" stop
-    fi
-fi
