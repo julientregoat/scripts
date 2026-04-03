@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# Download lossless audio (ALAC) from Apple Music URLs
+# Requires: wrapper (decryption server) running, MP4Box installed
+# Docs: See README.md in this directory
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source shared utilities (must come before using any utilities)
+source "$SCRIPT_DIR/utils.sh"
+
+# Load .env if it exists
+load_env "$SCRIPT_DIR"
+
+DOWNLOADER_CONTAINER="${APPLE_MUSIC_DOWNLOADER_CONTAINER:-apple-music-downloader}"
+CHECK_FORMAT_SCRIPT="$SCRIPT_DIR/check_format.sh"
+
+# Initialize variables
+OUTPUT_DIR=""
+ALAC_MAX=""
+
+# Show usage/help message
+# Usage: show_usage [--detailed]
+show_usage() {
+    local detailed="${1:-}"
+    
+    echo "usage: $0 [options] <apple-music-url> [url2] [url3] ..."
+    echo ""
+    echo "Download lossless ALAC audio from Apple Music URLs."
+    echo "Supports tracks, albums, playlists, and artists."
+    echo "Can download multiple URLs in a single run (more efficient)."
+    echo ""
+    echo "Options:"
+    echo "  --output-dir DIR         Output directory for downloads (default: ~/Downloads)"
+    if [ "$detailed" = "--detailed" ]; then
+        echo "  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect based on bit depth)"
+        echo "                            44100 for 16-bit, 48000 for 24-bit"
+        echo "                            Override: 44100, 48000, 96000, 192000"
+    else
+        echo "  --max-sample-rate RATE   Maximum sample rate in Hz (default: auto-detect)"
+    fi
+    echo "  -h, --help               Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0 https://music.apple.com/us/album/album-name/1234567890"
+    echo "  $0 --output-dir ~/Music https://music.apple.com/us/album/album-name/1234567890"
+    if [ "$detailed" = "--detailed" ]; then
+        echo "  $0 --max-sample-rate 44100 https://music.apple.com/us/album/album-name/1234567890"
+    fi
+    echo "  $0 https://music.apple.com/us/album/album1/123 https://music.apple.com/us/album/album2/456"
+    
+    if [ "$detailed" = "--detailed" ]; then
+        echo ""
+        echo "Environment variables:"
+        echo "  APPLE_MUSIC_WRAPPER_HOST  - Wrapper host (default: 127.0.0.1)"
+        echo "  APPLE_MUSIC_WRAPPER_PORT  - Wrapper port (default: 10020)"
+        echo ""
+        echo "Note: The wrapper is a long-lived service. Start it once with ./wrapper.sh start"
+        echo "and leave it running for multiple downloads."
+    fi
+}
+
+# Reorganize downloaded files (idempotent - safe to call multiple times)
+reorganize_files() {
+    local alac_dir="${OUTPUT_DIR:-$HOME/Downloads}/ALAC"
+    local target_dir="${OUTPUT_DIR:-$HOME/Downloads}/Apple Music Downloads"
+    
+    [ ! -d "$alac_dir" ] && return 0
+    
+    echo "Reorganizing files..."
+    mkdir -p "$target_dir"
+    
+    # Process each artist directory
+    for artist_dir in "$alac_dir"/*; do
+        [ ! -d "$artist_dir" ] && continue
+        
+        local artist_name=$(basename "$artist_dir")
+        
+        # Process each release in the artist directory
+        for release_dir in "$artist_dir"/*; do
+            [ ! -d "$release_dir" ] && continue
+            
+            local release_name=$(basename "$release_dir")
+            local new_dir_name="${artist_name} - ${release_name}"
+            local new_dir_path="$target_dir/$new_dir_name"
+            
+            # Move the release directory to the new location
+            if [ -d "$new_dir_path" ]; then
+                echo "  Merging into existing: $new_dir_name"
+                cp -r "$release_dir"/* "$new_dir_path/" 2>/dev/null || true
+                rm -rf "$release_dir"
+            else
+                echo "  Moving: $new_dir_name"
+                mv "$release_dir" "$new_dir_path" 2>/dev/null || {
+                    echo "  ⚠️  Could not move $new_dir_name (may be in use)"
+                }
+            fi
+        done
+        
+        # Remove artist directory if empty
+        [ -d "$artist_dir" ] && [ -z "$(ls -A "$artist_dir")" ] && rmdir "$artist_dir" 2>/dev/null || true
+    done
+    
+    # Remove ALAC directory if empty
+    [ -d "$alac_dir" ] && [ -z "$(ls -A "$alac_dir")" ] && rmdir "$alac_dir" 2>/dev/null || true
+    
+    echo "✓ Files reorganized to: $target_dir"
+}
+
+# Cleanup function for error handling
+cleanup() {
+    local exit_code=$?
+    
+    # Always try to reorganize files, even on error/timeout
+    if [ -n "$OUTPUT_DIR" ]; then
+        reorganize_files 2>/dev/null || true
+    fi
+    
+    exit $exit_code
+}
+
+trap cleanup EXIT INT TERM
+
+WRAPPER_HOST="${APPLE_MUSIC_WRAPPER_HOST:-127.0.0.1}"
+WRAPPER_PORT="${APPLE_MUSIC_WRAPPER_PORT:-10020}"
+
+# Parse flags
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --output-dir)
+            if [ -z "$2" ]; then
+                echo "error: --output-dir requires a directory path"
+                exit 1
+            fi
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --max-sample-rate)
+            if [ -z "$2" ]; then
+                echo "error: --max-sample-rate requires a sample rate value (e.g., 44100, 48000, 96000, 192000)"
+                exit 1
+            fi
+            ALAC_MAX="$2"
+            shift 2
+            ;;
+        --help|-h)
+            show_usage --detailed
+            exit 0
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Collect all URLs (everything remaining after flags)
+URLS=("$@")
+if [ ${#URLS[@]} -eq 0 ]; then
+    show_usage
+    exit 1
+fi
+
+# Check Docker
+require_docker
+
+# Check MP4Box
+if ! command -v MP4Box &> /dev/null && ! command -v mp4box &> /dev/null; then
+    echo "error: MP4Box must be installed (required by apple-music-downloader)."
+    echo "Install with: brew install gpac (macOS) or sudo apt-get install gpac (Linux)"
+    exit 1
+fi
+
+# Check if wrapper is running
+if ! check_port "$WRAPPER_HOST" "$WRAPPER_PORT"; then
+    echo "error: Wrapper server not reachable at $WRAPPER_HOST:$WRAPPER_PORT"
+    echo ""
+    echo "The wrapper (decryption server) must be running before downloading."
+    echo "Start it with: ./wrapper.sh start"
+    exit 1
+fi
+
+# Source check_format.sh to use its format checking function
+source "$CHECK_FORMAT_SCRIPT"
+
+# Check ALAC availability for all URLs
+# This will set ALAC_MAX based on detected bit depth
+if ! check_alac_formats "${URLS[@]}"; then
+    exit 1
+fi
+
+# Determine output directory (expand ~ if present)
+OUTPUT_DIR="${OUTPUT_DIR:-$HOME/Downloads}"
+OUTPUT_DIR="${OUTPUT_DIR/#\~/$HOME}"
+mkdir -p "$OUTPUT_DIR"
+
+# Reorganize any existing ALAC files before starting new download
+# This handles cases where a previous download was interrupted
+reorganize_files 2>/dev/null || true
+
+echo "Downloading from Apple Music..."
+
+if [ ${#URLS[@]} -eq 1 ]; then
+    echo "URL: ${URLS[0]}"
+else
+    echo "URLs: ${#URLS[@]} URLs"
+    for url in "${URLS[@]}"; do
+        echo "  - $url"
+    done
+fi
+echo "Output: $OUTPUT_DIR"
+echo ""
+
+# Warn on Apple Silicon (arm64): local wrapper can crash with albums/multiple tracks
+if [[ "$SYSTEM_ARCH" == "arm64" ]]; then
+    echo "⚠️  Apple Silicon: The local wrapper may crash during decryption when downloading albums or multiple tracks. Single-track (song) downloads often work. See README → Troubleshooting → Decryption fails."
+    echo ""
+fi
+
+# Run downloader in Docker (ALAC already validated by check_alac_formats)
+docker_args=(
+    --rm
+    --name "$DOWNLOADER_CONTAINER"
+    --platform linux/amd64
+    --network host
+    -v "$OUTPUT_DIR:/downloads"
+)
+
+docker_args+=("$DOWNLOADER_IMAGE")
+
+# Add --alac-max flag to downloader if specified (internal flag name)
+if [ -n "$ALAC_MAX" ]; then
+    docker_args+=(--alac-max "$ALAC_MAX")
+fi
+
+# Add URLs
+docker_args+=("${URLS[@]}")
+
+# Check if a download container is already running
+if container_is_running "$DOWNLOADER_CONTAINER"; then
+    echo "⚠️  Warning: A download container is already running: $DOWNLOADER_CONTAINER"
+    echo ""
+    echo "Please wait for the current download to finish, or stop it with:"
+    echo "  docker stop $DOWNLOADER_CONTAINER"
+    echo ""
+    echo "If you're sure the previous download is stuck, you can stop it and rerun this script."
+    exit 1
+fi
+
+# Clean up any stopped container with the same name (from --rm, should be rare)
+if container_exists "$DOWNLOADER_CONTAINER"; then
+    docker rm "$DOWNLOADER_CONTAINER" >/dev/null 2>&1 || true
+fi
+
+# Run download (blocks until completion; files in OUTPUT_DIR/ALAC/ if interrupted)
+echo "Starting download (this may take several minutes for large albums)..."
+if ! docker run "${docker_args[@]}"; then
+    echo ""
+    echo "⚠️  Warning: Download command exited with an error"
+    echo "Check if files were partially downloaded in: $OUTPUT_DIR/ALAC"
+    echo "You can manually reorganize files or re-run the script"
+    # Still try to reorganize any files that were downloaded
+    reorganize_files 2>/dev/null || true
+    exit 1
+fi
+
+echo ""
+echo "✓ Download complete!"
+
+# Reorganize downloaded files
+reorganize_files
+
+echo "Files saved to: $OUTPUT_DIR/Apple Music Downloads"
