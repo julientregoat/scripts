@@ -141,9 +141,9 @@ nc -z 127.0.0.1 10020           # Test port accessibility
 The arm64 wrapper binary can crash during decryption, especially with albums or multiple tracks. Single-track downloads usually work.
 
 **Workarounds:**
-- Retry - wrapper auto-restarts and retries often succeed
+- Retry — wrapper auto-restarts and retries often succeed
 - Download individual songs instead of full albums
-- Use x86_64 Linux for reliable batch downloads
+- Use a remote x86_64 wrapper for reliable batch downloads (not yet scripted — see [#6](https://github.com/julientregoat/scripts/issues/6))
 
 See [wrapper issue #8](https://github.com/WorldObservationLog/wrapper/issues/8).
 
