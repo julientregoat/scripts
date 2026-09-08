@@ -15,3 +15,5 @@ Assorted utility scripts.
 ## macOS
 
 - `kill_mac_notifications.sh` / `kill_notifications.applescript` - kills macOS Notification Center. useful for clearing system notification spam (e.g. "disk not ejected properly")
+- [`SYSTEM-CHANGES.md`](./SYSTEM-CHANGES.md) - log of deliberate, persistent changes to macOS system state (LaunchAgents, `defaults write` tweaks, disabled login items). records what changed, why, how to verify it is still in effect, and how to undo it. these live outside any repo and some revert themselves on app updates, so they are easy to lose track of
+- `verify_system_changes.sh` - checks that every change recorded in `SYSTEM-CHANGES.md` is still in effect. run it when a previously-fixed symptom reappears. exits non-zero on drift
